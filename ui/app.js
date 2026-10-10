@@ -6,7 +6,6 @@ const PDF_OPTS = {
   standardFontDataUrl: new URL('./vendor/pdfjs/standard_fonts/', import.meta.url).href,
   isEvalSupported: false
 };
-const {PDFDocument, degrees, rgb, StandardFonts, LineCapStyle, BlendMode} = window.PDFLib;
 const CSS_UNITS = 96 / 72;   // 100 % = real size on screen
 const SVGNS = 'http://www.w3.org/2000/svg';
 const STORE = 'pdf-studio.v1';
@@ -65,7 +64,7 @@ const I18N = {
     'set.defaultZoom': 'Default zoom for new documents', 'set.reset': 'Reset to defaults', 'set.done': 'Done',
     'set.resetDone': 'Settings reset to defaults',
     'about.p1': '<b>PDF Studio</b> is part of the Studio family: view, search, annotate, reorder, merge and split PDFs.',
-    'about.p2': 'Built with Rust (Tauri), Mozilla <a href="https://mozilla.github.io/pdf.js/">pdf.js</a> and <a href="https://pdf-lib.js.org">pdf-lib</a>.',
+    'about.p2': 'Built with Rust (Tauri, lopdf for saving) and Mozilla <a href="https://mozilla.github.io/pdf.js/">pdf.js</a> for display.',
     'about.p3': 'Annotations are drawn into the page when you save, so they show in every PDF viewer.',
     'about.version': 'Version {v}',
     'sc.tools': 'Tools (when not typing)', 'sc.wheel': 'Zoom', 'sc.wheelKey': 'Ctrl + mouse wheel', 'sc.drag': 'Reorder pages',
@@ -121,7 +120,7 @@ const I18N = {
     'set.defaultZoom': 'Standard-Zoom für neue Dokumente', 'set.reset': 'Auf Standard zurücksetzen', 'set.done': 'Fertig',
     'set.resetDone': 'Einstellungen zurückgesetzt',
     'about.p1': '<b>PDF Studio</b> gehört zur Studio-Familie: PDFs ansehen, durchsuchen, kommentieren, sortieren, zusammenführen und teilen.',
-    'about.p2': 'Gebaut mit Rust (Tauri), Mozilla <a href="https://mozilla.github.io/pdf.js/">pdf.js</a> und <a href="https://pdf-lib.js.org">pdf-lib</a>.',
+    'about.p2': 'Gebaut mit Rust (Tauri, lopdf zum Speichern) und Mozilla <a href="https://mozilla.github.io/pdf.js/">pdf.js</a> für die Anzeige.',
     'about.p3': 'Anmerkungen werden beim Speichern in die Seite gezeichnet und sind so in jedem PDF-Programm sichtbar.',
     'about.version': 'Version {v}',
     'sc.tools': 'Werkzeuge (außerhalb von Eingabefeldern)', 'sc.wheel': 'Zoomen', 'sc.wheelKey': 'Strg + Mausrad',
@@ -205,7 +204,9 @@ async function loadPdf(bytes, name) {
   const pdf = await task.promise;
   const proxies = [];
   for (let i = 1; i <= pdf.numPages; i++) proxies.push(await pdf.getPage(i));
-  return {bytes, pdf, proxies, encrypted: password != null};
+  // Rust keeps a copy for building the saved file (pdfbuild.rs); the UI then only sends page lists.
+  const rid = invoke ? await invoke('pdf_cache', bytes) : null;
+  return {bytes, pdf, proxies, encrypted: password != null, rid};
 }
 function pagesOf(src, srcIndex) {
   return src.proxies.map((p, index) => {
@@ -255,7 +256,7 @@ async function closeTab(i) {
   const d = docs[i];
   if (d.dirty && !await ask(t('confirm.close', {name: d.name}), t('confirm.ok'))) return;
   docs.splice(i, 1);
-  d.sources.forEach(s => s.pdf.destroy());
+  forgetSources(d.sources);
   let next = active;
   if (i < active) next--; else if (i === active) next = Math.min(active, docs.length - 1);
   active = -1;
@@ -652,56 +653,33 @@ async function insertPdf(files = null) {
 }
 
 /* ================= Building the output PDF ================= */
-const WINANSI_EXTRA = '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ';
-const winAnsi = s => [...s].map(c => c.charCodeAt(0) <= 0xff && c.charCodeAt(0) >= 0x20 || WINANSI_EXTRA.includes(c) ? c : '?').join('');
-async function buildPdf(d, onlyIds = null) {
-  const base = await PDFDocument.load(d.sources[0].bytes, {updateMetadata: false});
-  const list = onlyIds ? d.pages.filter(p => onlyIds.has(p.id)) : d.pages;
-  const orig = base.getPages(), copied = new Map();
-  for (const s of new Set(list.filter(p => p.src > 0).map(p => p.src))) {
-    const other = await PDFDocument.load(d.sources[s].bytes, {updateMetadata: false});
-    const idx = [...new Set(list.filter(p => p.src === s).map(p => p.index))];
-    const pages = await base.copyPages(other, idx);
-    copied.set(s, new Map(idx.map((ix, k) => [ix, pages[k]])));
-  }
-  const finals = list.map(p => p.src === 0 ? orig[p.index] : copied.get(p.src).get(p.index));
-  for (let i = base.getPageCount() - 1; i >= 0; i--) base.removePage(i);
-  const font = await base.embedFont(StandardFonts.Helvetica);
-  list.forEach((p, i) => {
-    const page = finals[i];
-    base.addPage(page);
-    page.setRotation(degrees(effRot(p)));
-    drawAnnotsPdf(d, p, page, font);
-  });
-  return base.save();
-}
-function drawAnnotsPdf(d, p, page, font) {
-  const list = d.annots[p.id] || [];
-  if (!list.length) return;
+/* The PDF is assembled in Rust (pdfbuild.rs): page order and rotation, pages from other files, and the annotations.
+   The UI only lays out the notes (display geometry); Rust writes everything into the file. */
+const forgetSources = list => { list.forEach(s => s.pdf.destroy()); if (invoke) invoke('pdf_forget', {ids: list.map(s => s.rid).filter(Boolean)}).catch(() => {}); };
+let helvCtx = null;
+/* Width of text in Helvetica (Arial has the same widths and is always available). */
+const helvWidth = (s, size) => { helvCtx = helvCtx || document.createElement('canvas').getContext('2d'); helvCtx.font = `${size}px Helvetica, Arial, sans-serif`; return helvCtx.measureText(s).width; };
+function annotsPdf(d, p) {
   const R = effRot(p), vp1 = proxyOf(d, p).getViewport({scale: 1, rotation: R});
-  for (const a of list) {
-    const color = rgb(...hexRgb(a.c).map(v => v / 255));
-    if (a.t === 'hl') {
-      page.drawRectangle({x: a.r[0], y: a.r[1], width: a.r[2] - a.r[0], height: a.r[3] - a.r[1], color, opacity: 0.4,
-        blendMode: BlendMode ? BlendMode.Multiply : undefined});
-    } else if (a.t === 'ink') {
-      for (let i = 1; i < a.p.length; i++) {
-        page.drawLine({start: {x: a.p[i - 1][0], y: a.p[i - 1][1]}, end: {x: a.p[i][0], y: a.p[i][1]}, thickness: a.w, color,
-          lineCap: LineCapStyle ? LineCapStyle.Round : undefined});
-      }
-    } else if (a.t === 'note') {
-      // Lay the note out in display space (scale 1), then map its corners back so it reads upright on rotated pages.
-      const [vx, vy] = vp1.convertToViewportPoint(a.x, a.y), lines = a.text.split('\n').map(winAnsi);
-      const w = Math.max(...lines.map(l => font.widthOfTextAtSize(l, NOTE.size))) + NOTE.pad * 2;
-      const h = lines.length * NOTE.line + NOTE.pad * 2;
-      const [bx, by] = vp1.convertToPdfPoint(vx, vy + h);
-      page.drawRectangle({x: bx, y: by, width: w, height: h, color: rgb(1, 0.97, 0.7), borderColor: color, borderWidth: 1, rotate: degrees(R)});
-      lines.forEach((l, k) => {
-        const [tx, ty] = vp1.convertToPdfPoint(vx + NOTE.pad, vy + NOTE.pad + (k + 1) * NOTE.line - 3.5);
-        page.drawText(l, {x: tx, y: ty, size: NOTE.size, font, color: rgb(0.13, 0.13, 0.13), rotate: degrees(R)});
-      });
-    }
-  }
+  return (d.annots[p.id] || []).map(a => {
+    if (a.t === 'hl') return {t: 'hl', r: a.r, c: a.c};
+    if (a.t === 'ink') return {t: 'ink', p: a.p, w: a.w, c: a.c};
+    // Notes are laid out in display space (scale 1) and mapped back, so they read upright on rotated pages.
+    const [vx, vy] = vp1.convertToViewportPoint(a.x, a.y), lines = a.text.split('\n');
+    const w = Math.max(...lines.map(l => helvWidth(l, NOTE.size))) + NOTE.pad * 2, h = lines.length * NOTE.line + NOTE.pad * 2;
+    const [bx, by] = vp1.convertToPdfPoint(vx, vy + h);
+    return {t: 'note', x: bx, y: by, w, h, rot: R, c: a.c, size: NOTE.size, lines: lines.map((text, k) => {
+      const [x, y] = vp1.convertToPdfPoint(vx + NOTE.pad, vy + NOTE.pad + (k + 1) * NOTE.line - 3.5);
+      return {x, y, text};
+    })};
+  });
+}
+async function buildPdf(d, onlyIds = null) {
+  // Files that needed a password to open keep their protection: they aren't re-saved unencrypted.
+  if (d.sources.some(s => s.encrypted)) throw new Error('encrypted');
+  const list = onlyIds ? d.pages.filter(p => onlyIds.has(p.id)) : d.pages;
+  const pages = list.map(p => ({src: p.src, index: p.index, rot: effRot(p), annots: annotsPdf(d, p)}));
+  return new Uint8Array(await invoke('pdf_build', {req: {sources: d.sources.map(s => s.rid), pages}}));
 }
 async function guardedBuild(d, onlyIds) {
   try { return await buildPdf(d, onlyIds); }
@@ -726,7 +704,7 @@ async function save(as = false) {
 /* After saving, the saved file becomes the document: edits are now part of its pages. */
 async function reloadFrom(d, bytes) {
   const src = await loadPdf(bytes, d.name);
-  d.sources.forEach(s => s.pdf.destroy());
+  forgetSources(d.sources);
   const current = d.current;
   Object.assign(d, {sources: [src], pages: pagesOf(src, 0), annots: {}, history: [], future: [], cleanDepth: 0, dirty: false,
     size: bytes.length, selected: new Set(), meta: await src.pdf.getMetadata().catch(() => null), outline: await src.pdf.getOutline().catch(() => null)});
@@ -1355,4 +1333,4 @@ if (window.Native) {
 
 // Exposed for automated UI tests in a browser.
 window.__pd = {openFiles, A, cur, buildPdf, setZoom, goToPage, addAnnot, annotAt, movePages, deletePages, rotatePages, insertPdf, undoRedo,
-  find, runFind, findStep, settings: () => settings};
+  find, runFind, findStep, settings: () => settings, pdfjsLib, PDF_OPTS};

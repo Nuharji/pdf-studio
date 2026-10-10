@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0 — 2026-10-10
+- Saving is now done by the app's Rust core: page order, rotation, pages from other PDFs and your highlights, ink and notes are written into the file there (much faster — a 15-page document builds in a few milliseconds).
+- PDFs that only carry an owner password (e.g. "printing not allowed") can now be saved with your changes; files that need a password to open keep their protection and aren't re-saved without it.
+- Notes keep umlauts and special characters like € when saved.
+- About 500 KB less JavaScript (the pdf-lib library is no longer needed).
 ## 1.1.5 — 2026-10-10
 - Icon fades swapped: dark themes now show the dark fade and light themes the light fade — in the menu bar, on the start screen and in the taskbar.
 

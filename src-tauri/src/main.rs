@@ -1,6 +1,8 @@
 // Hide the console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod pdfbuild;
+
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -225,7 +227,11 @@ fn main() {
             let _ = app.emit("context-menu", event.id().as_ref());
         })
         .manage(Mutex::new(Pending { ready: false, paths: args }))
+        .manage(pdfbuild::Sources::default())
         .invoke_handler(tauri::generate_handler![
+            pdfbuild::pdf_cache,
+            pdfbuild::pdf_forget,
+            pdfbuild::pdf_build,
             context_menu,
             clipboard_read,
             clipboard_write,
