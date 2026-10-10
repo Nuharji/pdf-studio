@@ -1,0 +1,33 @@
+# Flatpak manifest. Repackages the Linux .deb produced by `tauri build`
+# (the release workflow copies it to flatpak/app.deb before running flatpak-builder).
+id: com.studiofamily.pdfstudio
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: pdf-studio
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=ipc
+  - --share=network
+  - --filesystem=home
+modules:
+  - name: pdf-studio
+    buildsystem: simple
+    sources:
+      - type: file
+        path: app.deb
+    build-commands:
+      - ar -x app.deb
+      - tar -xf data.tar.*
+      - install -Dm755 usr/bin/pdf-studio /app/bin/pdf-studio
+      - |
+        desktop=$(ls usr/share/applications/*.desktop | head -n1)
+        sed -e 's/^Icon=.*/Icon=com.studiofamily.pdfstudio/' "$desktop" > com.studiofamily.pdfstudio.desktop
+        install -Dm644 com.studiofamily.pdfstudio.desktop /app/share/applications/com.studiofamily.pdfstudio.desktop
+      - |
+        for dir in usr/share/icons/hicolor/*/apps; do
+          size=$(basename "$(dirname "$dir")")
+          install -Dm644 "$dir/pdf-studio.png" "/app/share/icons/hicolor/$size/apps/com.studiofamily.pdfstudio.png"
+        done
