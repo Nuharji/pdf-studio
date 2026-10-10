@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.1.3 — 2026-10-10
+- New app icon with a dark-to-bright red fade, matching the Studio family look (also in the title bar and start screen).
+
 ## 1.1.2 — 2026-10-10
 - Right-click an annotation to delete it — now also with the normal select tool.
 
