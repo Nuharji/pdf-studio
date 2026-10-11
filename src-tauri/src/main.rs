@@ -258,6 +258,7 @@ fn main() {
             pdfbuild::pdf_cache,
             pdfbuild::pdf_forget,
             pdfbuild::pdf_build,
+            pdfbuild::pdf_blank,
             pdfinfo::pdf_info,
             spell::spell_check,
             spell::spell_suggest,

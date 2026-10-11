@@ -140,6 +140,10 @@ select:focus,input:focus{border-color:var(--accent)}
 .tab-new{background:none;border:0;width:30px;font-size:16px;color:var(--dim)}.tab-new:hover{color:var(--strong);background:var(--hover)}
 .findbar{display:none;align-items:center;gap:6px;padding:5px 10px;background:var(--chrome2);border-bottom:1px solid var(--line)}
 .findbar.show{display:flex}
+.blank-form{display:grid;grid-template-columns:auto 1fr;gap:12px 16px;align-items:center;min-width:360px}
+.blank-form .field-in{width:90px}
+.blank-form select{justify-self:start;min-width:220px}
+.blank-form .seg{justify-self:start}
 .field-in{background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:var(--radius);height:26px;padding:0 8px;font:inherit;outline:0;width:240px}
 .btn-sm{height:26px;padding:0 12px;border-radius:var(--btn-radius);border:1px solid var(--input-border);background:none}
 .btn-sm:hover{background:var(--hover)}

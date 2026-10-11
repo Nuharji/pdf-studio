@@ -277,10 +277,60 @@ pub async fn pdf_build(sources: State<'_, Sources>, req: BuildReq) -> Result<Res
     build(&bytes, &req.pages).map(Response::new)
 }
 
+/// A PDF of `n` blank pages of w×h points (1–500 pages). The UI opens it as one more source and inserts its pages.
+pub fn blank_pdf(w: f64, h: f64, n: usize) -> Result<Vec<u8>, String> {
+    if !(w.is_finite() && h.is_finite() && (36.0..=14400.0).contains(&w) && (36.0..=14400.0).contains(&h)) {
+        return Err("page size out of range".into());
+    }
+    let mut doc = Document::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    let content = doc.add_object(Stream::new(Dictionary::new(), Vec::new()));
+    let kids: Vec<Object> = (0..n.clamp(1, 500)).map(|_| Object::Reference(doc.add_object(dictionary! {
+        "Type" => "Page", "Parent" => pages_id, "MediaBox" => vec![0.into(), 0.into(), (w as f32).into(), (h as f32).into()],
+        "Contents" => content, "Resources" => Dictionary::new() }))).collect();
+    let count = kids.len() as i64;
+    doc.objects.insert(pages_id, Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => count }));
+    let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn pdf_blank(w: f64, h: f64, n: usize) -> Result<Response, String> {
+    blank_pdf(w, h, n).map(Response::new)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use lopdf::content::{Content, Operation};
+
+    #[test]
+    fn blank_pages_insert_and_annotate() {
+        let blank = blank_pdf(595.28, 841.89, 3).unwrap();
+        let doc = Document::load_mem(&blank).unwrap();
+        assert_eq!(doc.get_pages().len(), 3);
+        let first = *doc.get_pages().values().next().unwrap();
+        let mb = doc.get_dictionary(first).unwrap().get(b"MediaBox").unwrap().as_array().unwrap().clone();
+        assert!((mb[3].as_float().unwrap() - 841.89).abs() < 0.01);
+        assert!(blank_pdf(10.0, 10.0, 1).is_err());
+        // Two blank pages between pages of another file; one of them gets text.
+        let a = blank_pdf(612.0, 792.0, 1).unwrap();
+        let pages = vec![
+            PageReq { src: 0, index: 0, rot: 0, annots: vec![] },
+            PageReq { src: 1, index: 0, rot: 0, annots: vec![Annot::Text { rot: 0.0, c: "#000000".into(), size: 12.0, font: "helv".into(), bold: false,
+                lines: vec![NoteLine { x: 72.0, y: 700.0, text: "Neu".into() }] }] },
+            PageReq { src: 1, index: 1, rot: 0, annots: vec![] },
+        ];
+        let out = build(&[a, blank], &pages).unwrap();
+        let doc = Document::load_mem(&out).unwrap();
+        let ids: Vec<ObjectId> = doc.get_pages().values().copied().collect();
+        assert_eq!(ids.len(), 3);
+        assert!(text_of(&doc, ids[1]).contains("(Neu)"));
+        assert!(!text_of(&doc, ids[2]).contains("(Neu)"));
+    }
 
     /// A small PDF with `count` pages, each showing its number.
     fn sample(count: usize, label: &str) -> Vec<u8> {

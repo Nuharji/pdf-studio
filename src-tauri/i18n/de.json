@@ -199,5 +199,19 @@
   "ui.font": "Schriftart",
   "ui.fontSize": "Schriftgröße",
   "a.highlightSelection": "Ausgewählten Text markieren",
-  "toast.noSelection": "Zuerst Text auf einer Seite auswählen."
+  "toast.noSelection": "Zuerst Text auf einer Seite auswählen.",
+  "a.insertBlank": "Leere Seiten einfügen…",
+  "blank.size": "Seitengröße",
+  "blank.current": "Wie die aktuelle Seite · {size}",
+  "blank.orient": "Ausrichtung",
+  "blank.portrait": "Hochformat",
+  "blank.landscape": "Querformat",
+  "blank.count": "Anzahl Seiten",
+  "blank.where": "Einfügen",
+  "blank.after": "Nach der aktuellen Seite",
+  "blank.before": "Vor der aktuellen Seite",
+  "blank.start": "Am Anfang",
+  "blank.end": "Am Ende",
+  "blank.insert": "Einfügen",
+  "toast.blankAdded": "Leere Seiten eingefügt: {n}"
 }

@@ -199,5 +199,19 @@
   "ui.font": "Font",
   "ui.fontSize": "Font size",
   "a.highlightSelection": "Highlight Selected Text",
-  "toast.noSelection": "Select text on a page first."
+  "toast.noSelection": "Select text on a page first.",
+  "a.insertBlank": "Insert Blank Pages…",
+  "blank.size": "Page size",
+  "blank.current": "Like the current page · {size}",
+  "blank.orient": "Orientation",
+  "blank.portrait": "Portrait",
+  "blank.landscape": "Landscape",
+  "blank.count": "Number of pages",
+  "blank.where": "Insert",
+  "blank.after": "After the current page",
+  "blank.before": "Before the current page",
+  "blank.start": "At the beginning",
+  "blank.end": "At the end",
+  "blank.insert": "Insert",
+  "toast.blankAdded": "Blank pages inserted: {n}"
 }

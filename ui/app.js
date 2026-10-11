@@ -753,6 +753,54 @@ async function insertPdf(files = null) {
   if (added) { changed(true); toast(t('toast.inserted', {n: added})); }
 }
 
+/* Blank pages: Rust writes a PDF of empty pages (pdf_blank), which joins the document as one more source. */
+const PAPER = {a4: [595.28, 841.89], a5: [419.53, 595.28], a3: [841.89, 1190.55], letter: [612, 792], legal: [612, 1008]};
+const PAPER_NAMES = {a4: 'A4', a5: 'A5', a3: 'A3', letter: 'Letter', legal: 'Legal'};
+/* The current page as it is shown (rotation included), in points. */
+const curSize = d => { const p = d.pages[d.current] || d.pages[0]; return p ? (effRot(p) % 180 ? [p.h, p.w] : [p.w, p.h]) : PAPER.a4; };
+const mmSize = ([w, h]) => `${Math.round(w / 72 * 25.4)} × ${Math.round(h / 72 * 25.4)} mm`;
+async function insertBlank({size = 'current', landscape = null, n = 1, where = 'after'} = {}) {
+  const d = cur(); if (!d || !invoke) return;
+  let [w, h] = size === 'current' ? curSize(d) : PAPER[size] || PAPER.a4;
+  if (landscape != null && w !== h && (w > h) !== landscape) [w, h] = [h, w];
+  n = clamp(Math.round(+n) || 1, 1, 100);
+  let src;
+  try { src = await loadPdf(new Uint8Array(await invoke('pdf_blank', {w, h, n})), 'blank.pdf'); }
+  catch (e) { return toast(t('toast.saveFail', {e: e.message || e})); }
+  const idx = d.sources.push(src) - 1, pages = pagesOf(src, idx);
+  const at = {after: d.current + 1, before: d.current, start: 0, end: d.pages.length}[where] ?? d.current + 1;
+  pushHistory(d);
+  d.pages.splice(clamp(at, 0, d.pages.length), 0, ...pages);
+  d.selected = new Set(pages.map(p => p.id));
+  changed(true);
+  goToPage(clamp(at, 0, d.pages.length - 1));
+  toast(t('toast.blankAdded', {n}));
+}
+function blankDialog() {
+  const d = cur(); if (!d) return;
+  const o = {size: 'current', n: 1, where: 'after', landscape: false, ...settings.blank}, cs = curSize(d);
+  let land = o.size === 'current' ? cs[0] > cs[1] : !!o.landscape;
+  const opt = (v, l, on) => `<option value="${v}"${on ? ' selected' : ''}>${esc(l)}</option>`;
+  modal(t('a.insertBlank'), `<div class="blank-form">
+    <label for="bSize">${esc(t('blank.size'))}</label><select id="bSize">${opt('current', t('blank.current', {size: mmSize(cs)}), o.size === 'current')}${
+      Object.keys(PAPER).map(k => opt(k, PAPER_NAMES[k] + ' · ' + mmSize(PAPER[k]), o.size === k)).join('')}</select>
+    <label>${esc(t('blank.orient'))}</label><div class="seg" id="bOrient"><button data-o="0">${esc(t('blank.portrait'))}</button><button data-o="1">${esc(t('blank.landscape'))}</button></div>
+    <label for="bCount">${esc(t('blank.count'))}</label><input type="number" class="field-in" id="bCount" min="1" max="100" value="${o.n}">
+    <label for="bWhere">${esc(t('blank.where'))}</label><select id="bWhere">${['after', 'before', 'start', 'end'].map(w => opt(w, t('blank.' + w), o.where === w)).join('')}</select>
+  </div>`, [{label: t('ui.cancel'), onClick: closeModal}, {label: t('blank.insert'), primary: true, onClick: () => go()}]);
+  const seg = () => $$('#bOrient button').forEach(b => b.classList.toggle('active', +b.dataset.o === +land));
+  seg();
+  $('#bOrient').onclick = e => { const b = e.target.closest('button'); if (b) { land = b.dataset.o === '1'; seg(); } };
+  $('#bSize').onchange = e => { if (e.target.value === 'current') { land = cs[0] > cs[1]; seg(); } };
+  const go = () => {
+    const choice = {size: $('#bSize').value, landscape: land, n: clamp(Math.round(+$('#bCount').value) || 1, 1, 100), where: $('#bWhere').value};
+    settings.blank = choice; saveState(); closeModal();
+    insertBlank(choice);
+  };
+  $('#bCount').onkeydown = e => { if (e.key === 'Enter') go(); };
+  $('#bCount').focus(); $('#bCount').select();
+}
+
 /* ================= Building the output PDF ================= */
 /* The PDF is assembled in Rust (pdfbuild.rs): page order and rotation, pages from other files, and the annotations.
    The UI only lays out the notes (display geometry); Rust writes everything into the file. */
@@ -1098,6 +1146,7 @@ const ICONS = {
   rotR: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>',
   extract: '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 18v-6M9 15l3 3 3-3"/></svg>',
+  blank: '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M17 15v6M14 18h6" stroke-width="2.2"/></svg>',
   insert: '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 12v6M9 15h6"/></svg>',
   moon: '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
   print: '<svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="7"/></svg>',
@@ -1109,7 +1158,7 @@ const needsDoc = fn => () => cur() && fn();
 const A = {
   toggleAutoHide: () => { settings.autoHide = !settings.autoHide; applySettings(); },
   openFile: async () => openFiles(await pickFiles()),
-  insertPdf: needsDoc(() => insertPdf()), save: needsDoc(() => save(false)), saveAs: needsDoc(() => save(true)),
+  insertPdf: needsDoc(() => insertPdf()), insertBlank: needsDoc(() => blankDialog()), save: needsDoc(() => save(false)), saveAs: needsDoc(() => save(true)),
   exportPng: needsDoc(exportPng), print: needsDoc(printDoc), closeTab: needsDoc(() => closeTab(active)),
   undo: () => undoRedo(false), redo: () => undoRedo(true),
   find: needsDoc(openFind), findNext: needsDoc(() => findStep()),
@@ -1159,7 +1208,7 @@ const MENUS = [
   ['file', [['openFile', 'Ctrl+O'], ['insertPdf', 'Ctrl+Shift+O'], '-', ['save', 'Ctrl+S'], ['saveAs', 'Ctrl+Shift+S'], '-',
     ['exportPng', 'Ctrl+E'], ['print', 'Ctrl+P'], '-', ['closeTab', 'Alt+W']]],
   ['edit', [['undo', 'Ctrl+Z'], ['redo', 'Ctrl+Y'], '-', ['find', 'Ctrl+F'], ['findNext', 'F3'], '-', ['selectAllPages']]],
-  ['pages', [['rotateLeft', 'Ctrl+Shift+R'], ['rotateRight', 'Ctrl+R'], ['deletePages', 'Delete', null, true], ['extractPages', 'Ctrl+Shift+E'], '-',
+  ['pages', [['rotateLeft', 'Ctrl+Shift+R'], ['rotateRight', 'Ctrl+R'], ['deletePages', 'Delete', null, true], ['extractPages', 'Ctrl+Shift+E'], ['insertBlank', 'Ctrl+Shift+N'], '-',
     ['firstPage', 'Ctrl+Home'], ['prevPage', 'Ctrl+PageUp'], ['nextPage', 'Ctrl+PageDown'], ['lastPage', 'Ctrl+End']]],
   ['tools', [['toolSelect', 'V', () => tool === 'select', true], ['toolHand', 'H', () => tool === 'hand', true], '-',
     ['toolHighlight', 'M', () => tool === 'highlight', true], ['toolPen', 'P', () => tool === 'pen', true],
@@ -1225,7 +1274,7 @@ function buildToolbars() {
     ['redo', ICONS.redo, {needsDoc: 1}], ['find', ICONS.search, {needsDoc: 1}]]);
   fill('#viewBtns', [['toggleInvert', ICONS.moon], ['print', ICONS.print, {needsDoc: 1}], ['togglePanels', ICONS.panel], ['settings', ICONS.gear], ['shortcuts', ICONS.help]]);
   fill('#pageTools', [['rotateLeft', ICONS.rotL, {needsDoc: 1}], ['rotateRight', ICONS.rotR, {needsDoc: 1}], ['deletePages', ICONS.trash, {needsDoc: 1}],
-    ['extractPages', ICONS.extract, {needsDoc: 1}], ['insertPdf', ICONS.insert, {needsDoc: 1}]]);
+    ['extractPages', ICONS.extract, {needsDoc: 1}], ['insertPdf', ICONS.insert, {needsDoc: 1}], ['insertBlank', ICONS.blank, {needsDoc: 1}]]);
   const tools = $('#tools'); tools.innerHTML = '';
   [['toolSelect', 'select'], ['toolHand', 'hand'], '-', ['toolHighlight', 'highlight'], ['toolPen', 'pen'], ['toolText', 'text'], ['toolNote', 'note'], ['toolErase', 'erase'], '-']
     .forEach(r => {
@@ -1431,7 +1480,7 @@ if (window.Native) {
       const i = +th.dataset.i, id = d.pages[i].id;
       if (!d.selected.has(id)) d.selected = new Set([id]);
       d.current = i; markThumbs(); updateUI();
-      return [item('rotateLeft'), item('rotateRight'), item('deletePages'), null, item('extractPages'), item('insertPdf')];
+      return [item('rotateLeft'), item('rotateRight'), item('deletePages'), null, item('extractPages'), item('insertPdf'), item('insertBlank')];
     }
     const pg = e.target.closest('.page');
     if (pg) {
@@ -1482,5 +1531,5 @@ if (window.Native) {
 })();
 
 // Exposed for automated UI tests in a browser.
-window.__pd = {highlightRange, selectionRange, openNoteEditor, openTextEditor, textDown, getTextEd: () => textEd, settings: () => settings, openFiles, A, cur, buildPdf, setZoom, goToPage, addAnnot, annotAt, movePages, deletePages, rotatePages, insertPdf, undoRedo,
+window.__pd = {insertBlank, blankDialog, highlightRange, selectionRange, openNoteEditor, openTextEditor, textDown, getTextEd: () => textEd, settings: () => settings, openFiles, A, cur, buildPdf, setZoom, goToPage, addAnnot, annotAt, movePages, deletePages, rotatePages, insertPdf, undoRedo,
   find, runFind, findStep, settings: () => settings, pdfjsLib, PDF_OPTS};

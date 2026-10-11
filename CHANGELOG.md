@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.9.0 — 2026-10-11
+- New: Insert Blank Pages (Pages menu, Ctrl+Shift+N, page panel, right-click on a thumbnail). Choose the size (like the current page, A4, A5, A3, Letter or Legal), portrait or landscape, how many pages and where they go (after or before the current page, at the beginning or the end). The pages can be written and drawn on like any other page; undo removes them. The dialog remembers your last choice.
+
 ## 1.8.0 — 2026-10-11
 - New: highlight the text that is already in a PDF. With the highlight tool (M), a drag that starts on text follows the letters and lines like a text selection and highlights exactly that text; a drag beside the text still draws a box (the cursor shows which). With the select tool, select text and press M, Ctrl+Shift+H or right-click → Highlight Selected Text. The highlight is saved into the PDF; it can be erased and undone as one piece.
 
