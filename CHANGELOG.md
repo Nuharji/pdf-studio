@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.2.1 — 2026-10-11
+- The English and German texts are now language files (src-tauri/i18n) delivered by the app's Rust core instead of being part of the JavaScript.
+
 ## 1.2.0 — 2026-10-10
 - Saving is now done by the app's Rust core: page order, rotation, pages from other PDFs and your highlights, ink and notes are written into the file there (much faster — a 15-page document builds in a few milliseconds).
 - PDFs that only carry an owner password (e.g. "printing not allowed") can now be saved with your changes; files that need a password to open keep their protection and aren't re-saved without it.
