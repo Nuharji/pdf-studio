@@ -33,7 +33,7 @@ const fmtSize = b => b >= 1048576 ? (b / 1048576).toLocaleString(lang, {maximumF
 /* ================= Settings & state ================= */
 const THEMES = ['dark', 'light', 'github', 'github-dark'];
 const COLORS = ['#FFD400', '#7CE38B', '#62B3FF', '#FF7AB6', '#E5384F', '#1F2328'];
-const DEF = {lang: 'auto', theme: 'dark', zoomMode: 'fit-width', invert: false, dock: true, dockTab: 'pages', reopen: true, color: '#FFD400', spell: 'auto'};
+const DEF = {autoHide: false, lang: 'auto', theme: 'dark', zoomMode: 'fit-width', invert: false, dock: true, dockTab: 'pages', reopen: true, color: '#FFD400', spell: 'auto'};
 let settings = {...DEF}, recent = [], docs = [], active = -1, tool = 'select', booted = false, docSeq = 0, pageSeq = 0;
 const cur = () => docs[active];
 const effectiveLang = () => settings.lang === 'auto'
@@ -891,6 +891,7 @@ const ICONS = {
 };
 const needsDoc = fn => () => cur() && fn();
 const A = {
+  toggleAutoHide: () => { settings.autoHide = !settings.autoHide; applySettings(); },
   openFile: async () => openFiles(await pickFiles()),
   insertPdf: needsDoc(() => insertPdf()), save: needsDoc(() => save(false)), saveAs: needsDoc(() => save(true)),
   exportPng: needsDoc(exportPng), print: needsDoc(printDoc), closeTab: needsDoc(() => closeTab(active)),
@@ -940,7 +941,7 @@ const MENUS = [
     ['toolNote', 'T', () => tool === 'note', true], ['toolErase', 'E', () => tool === 'erase', true]]],
   ['view', [['fitWidth', 'Ctrl+1', () => cur() && cur().zoomMode === 'fit-width'], ['fitPage', 'Ctrl+2', () => cur() && cur().zoomMode === 'fit-page'],
     ['actualSize', 'Ctrl+0'], ['zoomIn', 'Ctrl+='], ['zoomOut', 'Ctrl+-'], '-',
-    ['togglePanels', 'Ctrl+\\', () => settings.dock], ['toggleInvert', 'Ctrl+Shift+I', () => settings.invert]]],
+    ['togglePanels', 'Ctrl+\\', () => settings.dock], ['toggleAutoHide', null, () => settings.autoHide], ['toggleInvert', 'Ctrl+Shift+I', () => settings.invert]]],
   ['settings', [['settings', 'Ctrl+,'], '-', '#menu.language',
     ['langAuto', null, () => settings.lang === 'auto'], ['langEn', null, () => settings.lang === 'en'], ['langDe', null, () => settings.lang === 'de'],
     '-', '#menu.theme',
@@ -1087,7 +1088,7 @@ function renderSettings() {
   const body = {
     general: `<h3>${t('set.language')}</h3><p class="hint">${t('set.languageHint')}</p>
       <select class="wide-sel" data-sel="lang">${opt('auto', t('a.langAuto'), settings.lang)}${opt('en', 'English', settings.lang)}${opt('de', 'Deutsch', settings.lang)}</select>
-      <h3>${t('set.layout')}</h3>${sw('dock', t('set.panels'))}${sw('reopen', t('set.reopen'))}`,
+      <h3>${t('set.layout')}</h3>${sw('dock', t('set.panels'))}${sw('autoHide', t('set.autoHide'))}${sw('reopen', t('set.reopen'))}`,
     appearance: `<h3>${t('set.theme')}</h3><div class="theme-grid">` + THEMES.map(th =>
         `<button class="theme-card${settings.theme === th ? ' active' : ''}" data-theme-pick="${th}">${mock(th)}
          <div class="theme-name">${esc(t('theme.' + th))}<span>${settings.theme === th ? '&#10003;' : ''}</span></div></button>`).join('') +
@@ -1127,6 +1128,7 @@ function applyLanguage() {
   if (booted) { renderTabs(); buildThumbs(); buildOutline(); buildProps(); renderRecent(); updateUI(); setTool(tool); }
 }
 function applySettings() {
+  if (window.AutoHide) AutoHide.set(settings.autoHide);
   if (!THEMES.includes(settings.theme)) settings.theme = 'dark';
   const nl = effectiveLang();
   if (nl !== lang) { lang = nl; applyLanguage(); }

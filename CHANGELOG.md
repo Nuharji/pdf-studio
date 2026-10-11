@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.4.0 — 2026-10-11
+- New: Auto-hide bars (View menu, or Settings → General). The menu bar, toolbar, tool rail and status bar leave the window and slide in when the mouse touches their edge; they stay while a menu is open or you type in them. Alt alone shows the top bars (Escape or a click elsewhere hides them).
+
 ## 1.3.0 — 2026-10-11
 - Spelling & grammar check while typing a note, German and English, entirely on your PC: misspelled words get a red wavy underline, grammar hints a blue one. Right-click for suggestions, “Add to dictionary” (a personal dictionary shared by all Studio apps) or “Ignore”.
 - Settings → Viewer → Spelling & grammar: Automatic (German + English), German, English or Off.
