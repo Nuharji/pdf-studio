@@ -33,7 +33,8 @@ const fmtSize = b => b >= 1048576 ? (b / 1048576).toLocaleString(lang, {maximumF
 /* ================= Settings & state ================= */
 const THEMES = ['dark', 'light', 'github', 'github-dark'];
 const COLORS = ['#FFD400', '#7CE38B', '#62B3FF', '#FF7AB6', '#E5384F', '#1F2328'];
-const DEF = {keys: {}, autoHide: false, lang: 'auto', theme: 'dark', zoomMode: 'fit-width', invert: false, dock: true, dockTab: 'pages', reopen: true, color: '#FFD400', spell: 'auto'};
+const DEF = {keys: {}, autoHide: false, lang: 'auto', theme: 'dark', zoomMode: 'fit-width', invert: false, dock: true, dockTab: 'pages', reopen: true, color: '#FFD400', spell: 'auto',
+  textColor: '#1F2328', textFont: 'helv', textSize: 14, textBold: false};
 let settings = {...DEF}, recent = [], docs = [], active = -1, tool = 'select', booted = false, docSeq = 0, pageSeq = 0;
 const cur = () => docs[active];
 const effectiveLang = () => settings.lang === 'auto'
@@ -339,6 +340,19 @@ function noteBox(text, scale) {
   const w = Math.max(...lines.map(l => measureCtx.measureText(l).width)) + NOTE.pad * 2;
   return {lines, w: w * scale, h: (lines.length * NOTE.line + NOTE.pad * 2) * scale};
 }
+/* Text tool: text written straight onto the page in a standard PDF font. Arial, Times New Roman and Courier New have
+   the widths of Helvetica, Times and Courier, so what you see is laid out like the saved file. */
+const TEXT_FONTS = {helv: 'Helvetica, Arial, sans-serif', times: '"Times New Roman", Times, serif', cour: '"Courier New", Courier, monospace'};
+const FONT_NAMES = {helv: 'Helvetica', times: 'Times', cour: 'Courier'};
+const TEXT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72];
+const TEXT_LINE = 1.2, TEXT_BASE = .94;   // line height and first baseline below the top, in font sizes
+const textCss = (a, size) => `${a.bold ? 'bold ' : ''}${size}px ${TEXT_FONTS[a.font] || TEXT_FONTS.helv}`;
+function textWidth(s, a, size = a.size) {
+  measureCtx = measureCtx || document.createElement('canvas').getContext('2d');
+  measureCtx.font = textCss(a, size);
+  return measureCtx.measureText(s).width;
+}
+const textBox = (a, scale) => { const lines = a.text.split('\n'); return {w: Math.max(...lines.map(l => textWidth(l, a))) * scale, h: lines.length * TEXT_LINE * a.size * scale}; };
 function drawAnnots(el) {
   const d = cur(), pg = el._pg, vp = el._vp, svg = el.querySelector('svg.annots');
   if (!svg || !vp) return;
@@ -359,6 +373,12 @@ function drawAnnots(el) {
       return `<g class="ann" data-k="${k}"><rect x="${x}" y="${y}" width="${box.w}" height="${box.h}" fill="#FFF7B3" stroke="${a.c}" stroke-width="${s}"/>` +
         `<text font-family="Helvetica, Arial, sans-serif" font-size="${NOTE.size * s}" fill="#222">${tsp}</text></g>`;
     }
+    if (a.t === 'text') {
+      const [x, y] = vp.convertToViewportPoint(a.x, a.y), s = vp.scale;
+      const tsp = a.text.split('\n').map((l, i) => `<tspan x="${x}" y="${y + (TEXT_BASE + i * TEXT_LINE) * a.size * s}">${esc(l) || ' '}</tspan>`).join('');
+      return `<text class="ann txt" data-k="${k}" font-family="${esc(TEXT_FONTS[a.font] || TEXT_FONTS.helv)}" font-size="${a.size * s}"` +
+        `${a.bold ? ' font-weight="bold"' : ''} fill="${a.c}" style="white-space:pre">${tsp}</text>`;
+    }
     return '';
   }).join('');
 }
@@ -377,6 +397,9 @@ function annotAt(el, clientX, clientY) {
     } else if (a.t === 'note') {
       const [nx, ny] = vp.convertToViewportPoint(a.x, a.y), b = noteBox(a.text, vp.scale);
       if (x >= nx && x <= nx + b.w && y >= ny && y <= ny + b.h) return k;
+    } else if (a.t === 'text') {
+      const [tx, ty] = vp.convertToViewportPoint(a.x, a.y), b = textBox(a, vp.scale);
+      if (x >= tx - 3 && x <= tx + b.w + 3 && y >= ty && y <= ty + b.h) return k;
     }
   }
   return -1;
@@ -401,6 +424,7 @@ pagesEl.addEventListener('pointerdown', e => {
   }
   e.preventDefault();
   if (tool === 'note') return openNoteEditor(el, local(e));
+  if (tool === 'text') return textDown(e, el, local(e));
   svg.setPointerCapture(e.pointerId);
   const start = local(e), pts = [start];
   const temp = document.createElementNS(SVGNS, tool === 'highlight' ? 'rect' : 'polyline');
@@ -460,6 +484,87 @@ function openNoteEditor(el, [x, y]) {
   ta.addEventListener('blur', () => { if (document.hasFocus()) commit(true); });
   ta.addEventListener('pointerdown', e => e.stopPropagation());
 }
+/* Text tool: a click writes new text; a click on a text edits it, dragging moves it. */
+function textDown(e, el, p) {
+  if (textEd) return textEd.commit(true);   // a click beside the open editor just finishes it
+  const d = cur(), list = d.annots[el._pg.id] || [], k = annotAt(el, e.clientX, e.clientY);
+  if (k < 0 || list[k].t !== 'text') return openTextEditor(el, p);
+  const svg = el.querySelector('svg.annots'), node = svg.querySelector(`[data-k="${k}"]`);
+  svg.setPointerCapture(e.pointerId);
+  let dx = 0, dy = 0;
+  const move = ev => { dx = ev.clientX - e.clientX; dy = ev.clientY - e.clientY; if (node) node.setAttribute('transform', `translate(${dx} ${dy})`); };
+  svg.addEventListener('pointermove', move);
+  svg.addEventListener('pointerup', () => {
+    svg.removeEventListener('pointermove', move);
+    if (Math.hypot(dx, dy) < 3) { if (node) node.removeAttribute('transform'); return openTextEditor(el, null, k); }
+    const vp = el._vp, a = list[k], [x, y] = vp.convertToViewportPoint(a.x, a.y);
+    pushHistory(d);
+    [a.x, a.y] = vp.convertToPdfPoint(x + dx, y + dy);
+    changed();
+  }, {once: true});
+}
+let textEd = null;   // the open text editor: {ta, style(), commit(keep)}
+function openTextEditor(el, p, k = -1) {
+  const d = cur(), list = d.annots[el._pg.id] = d.annots[el._pg.id] || [], orig = k >= 0 ? list[k] : null;
+  if (orig) {   // editing: the text leaves the page while it is in the editor, with its look in the options
+    list.splice(k, 1); drawAnnots(el);
+    Object.assign(settings, {textFont: orig.font, textSize: orig.size, textBold: !!orig.bold, textColor: orig.c}); syncTextOpts();
+  }
+  const [x, y] = orig ? el._vp.convertToViewportPoint(orig.x, orig.y) : p;
+  const ta = document.createElement('textarea');
+  ta.className = 'text-edit'; ta.placeholder = t('ui.textPh'); ta.wrap = 'off';
+  ta.value = orig ? orig.text : '';
+  ta.style.left = x + 'px'; ta.style.top = y + 'px';
+  el.append(ta);
+  const style = () => {
+    const a = {font: settings.textFont, bold: settings.textBold}, size = settings.textSize * el._vp.scale, lines = (ta.value || ta.placeholder).split('\n');
+    Object.assign(ta.style, {font: textCss(a, size), lineHeight: TEXT_LINE, color: settings.textColor});
+    ta.style.width = Math.max(...lines.map(l => textWidth(l, a, size))) + size + 'px';
+    ta.style.height = lines.length * TEXT_LINE * size + 'px';
+  };
+  style(); ta.addEventListener('input', style);
+  ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+  if (window.SpellField) SpellField.attach(ta, {lang: () => settings.spell, fallback: () => lang, ignored: spellIgnored});
+  let done = false;
+  const commit = keep => {
+    if (done) return; done = true; textEd = null;
+    const text = ta.value.replace(/\s+$/, '');
+    ta.remove(); if (ta.nextElementSibling && ta.nextElementSibling.classList.contains('spell-marks')) ta.nextElementSibling.remove();
+    const a = {t: 'text', x: 0, y: 0, text, size: settings.textSize, font: settings.textFont, bold: settings.textBold, c: settings.textColor};
+    if (orig) {
+      list.splice(k, 0, orig);
+      const next = {...a, x: orig.x, y: orig.y};
+      if (!keep || JSON.stringify(next) === JSON.stringify(orig)) return drawAnnots(el);
+      pushHistory(d);
+      if (text) list[k] = next; else list.splice(k, 1);
+      return changed();
+    }
+    if (keep && text) { [a.x, a.y] = el._vp.convertToPdfPoint(x, y); addAnnot(el._pg, a); }
+  };
+  ta.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Escape') commit(false);
+    if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) { e.preventDefault(); commit(true); }
+  });
+  // Choosing a font or size in the options bar keeps the editor open.
+  ta.addEventListener('blur', e => { if (e.relatedTarget && e.relatedTarget.closest('#textOpts')) return; if (document.hasFocus()) commit(true); });
+  ta.addEventListener('pointerdown', e => e.stopPropagation());
+  textEd = {ta, style, commit};
+}
+const colorKey = () => tool === 'text' ? 'textColor' : 'color';
+function syncTextOpts() {
+  const f = $('#textFont'), s = $('#textSize'), b = $('#textOpts [data-act="textBold"]');
+  if (f) f.value = settings.textFont;
+  if (s) s.value = String(settings.textSize);
+  if (b) b.classList.toggle('active', !!settings.textBold);
+  $$('.swatch').forEach(w => w.classList.toggle('active', w.dataset.color === settings[colorKey()]));
+}
+$('#textOpts').addEventListener('change', e => {
+  if (e.target.id === 'textFont') settings.textFont = e.target.value;
+  if (e.target.id === 'textSize') settings.textSize = +e.target.value;
+  saveState();
+  if (textEd) { textEd.style(); textEd.ta.focus(); }
+});
 /* Hand tool: drag to pan */
 viewer.addEventListener('pointerdown', e => {
   if (tool !== 'hand' || e.button !== 0) return;
@@ -470,14 +575,17 @@ viewer.addEventListener('pointerdown', e => {
   viewer.addEventListener('pointerup', () => { viewer.removeEventListener('pointermove', move); document.body.classList.remove('panning'); }, {once: true});
 });
 function setTool(name) {
+  if (textEd && name !== 'text') textEd.commit(true);
   tool = name;
   document.body.className = document.body.className.replace(/\btool-\S+/g, '').trim() + ' tool-' + name;
   document.body.classList.toggle('invert', settings.invert);
   $$('#tools .ibtn[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === name));
-  $('#swatches').style.display = ['highlight', 'pen', 'note'].includes(name) ? '' : 'none';
+  $('#swatches').style.display = ['highlight', 'pen', 'note', 'text'].includes(name) ? '' : 'none';
+  $('#textOpts').style.display = name === 'text' ? '' : 'none';
+  syncTextOpts();
   $('#stTool').textContent = t('tool.status', {name: t('a.' + TOOL_ACT[name])});
 }
-const TOOL_ACT = {select: 'toolSelect', hand: 'toolHand', highlight: 'toolHighlight', pen: 'toolPen', note: 'toolNote', erase: 'toolErase'};
+const TOOL_ACT = {select: 'toolSelect', hand: 'toolHand', highlight: 'toolHighlight', pen: 'toolPen', note: 'toolNote', text: 'toolText', erase: 'toolErase'};
 
 /* ================= History & page operations ================= */
 const snapshot = d => ({pages: d.pages.map(p => ({...p})), annots: JSON.parse(JSON.stringify(d.annots))});
@@ -566,6 +674,13 @@ function annotsPdf(d, p) {
   return (d.annots[p.id] || []).map(a => {
     if (a.t === 'hl') return {t: 'hl', r: a.r, c: a.c};
     if (a.t === 'ink') return {t: 'ink', p: a.p, w: a.w, c: a.c};
+    if (a.t === 'text') {   // lines laid out in display space like notes, so the text reads upright on rotated pages
+      const [vx, vy] = vp1.convertToViewportPoint(a.x, a.y);
+      return {t: 'text', rot: R, c: a.c, size: a.size, font: a.font, bold: !!a.bold, lines: a.text.split('\n').map((text, k) => {
+        const [x, y] = vp1.convertToPdfPoint(vx, vy + (TEXT_BASE + k * TEXT_LINE) * a.size);
+        return {x, y, text};
+      })};
+    }
     // Notes are laid out in display space (scale 1) and mapped back, so they read upright on rotated pages.
     const [vx, vy] = vp1.convertToViewportPoint(a.x, a.y), lines = a.text.split('\n');
     const w = Math.max(...lines.map(l => helvWidth(l, NOTE.size))) + NOTE.pad * 2, h = lines.length * NOTE.line + NOTE.pad * 2;
@@ -884,6 +999,8 @@ const ICONS = {
   highlight: '<svg viewBox="0 0 24 24"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>',
   pen: '<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
   note: '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/></svg>',
+  text: '<svg viewBox="0 0 24 24"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>',
+  bold: '<svg viewBox="0 0 24 24"><path d="M7 4h7a4 4 0 0 1 0 8H7zM7 12h8a4 4 0 0 1 0 8H7z"/></svg>',
   erase: '<svg viewBox="0 0 24 24"><path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L13 19"/><path d="M22 21H7M5 11l9 9"/></svg>',
   rotL: '<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
   rotR: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
@@ -909,7 +1026,8 @@ const A = {
   firstPage: () => goToPage(0), prevPage: () => cur() && goToPage(cur().current - 1),
   nextPage: () => cur() && goToPage(cur().current + 1), lastPage: () => cur() && goToPage(cur().pages.length - 1),
   toolSelect: () => setTool('select'), toolHand: () => setTool('hand'), toolHighlight: () => setTool('highlight'),
-  toolPen: () => setTool('pen'), toolNote: () => setTool('note'), toolErase: () => setTool('erase'),
+  toolPen: () => setTool('pen'), toolNote: () => setTool('note'), toolText: () => setTool('text'),
+  textBold: () => { settings.textBold = !settings.textBold; syncTextOpts(); saveState(); if (textEd) textEd.style(); }, toolErase: () => setTool('erase'),
   fitWidth: () => setZoom('fit-width'), fitPage: () => setZoom('fit-page'), actualSize: () => setZoom(1),
   zoomIn: () => zoomStep(1), zoomOut: () => zoomStep(-1),
   togglePanels: () => { settings.dock = !settings.dock; applySettings(); },
@@ -945,7 +1063,8 @@ const MENUS = [
     ['firstPage', 'Ctrl+Home'], ['prevPage', 'Ctrl+PageUp'], ['nextPage', 'Ctrl+PageDown'], ['lastPage', 'Ctrl+End']]],
   ['tools', [['toolSelect', 'V', () => tool === 'select', true], ['toolHand', 'H', () => tool === 'hand', true], '-',
     ['toolHighlight', 'M', () => tool === 'highlight', true], ['toolPen', 'P', () => tool === 'pen', true],
-    ['toolNote', 'T', () => tool === 'note', true], ['toolErase', 'E', () => tool === 'erase', true]]],
+    ['toolText', 'T', () => tool === 'text', true], ['toolNote', 'N', () => tool === 'note', true], ['toolErase', 'E', () => tool === 'erase', true], '-',
+    ['textBold', 'Ctrl+B', () => settings.textBold]]],
   ['view', [['fitWidth', 'Ctrl+1', () => cur() && cur().zoomMode === 'fit-width'], ['fitPage', 'Ctrl+2', () => cur() && cur().zoomMode === 'fit-page'],
     ['actualSize', 'Ctrl+0'], ['zoomIn', 'Ctrl+='], ['zoomOut', 'Ctrl+-'], '-',
     ['togglePanels', 'Ctrl+\\', () => settings.dock], ['toggleAutoHide', null, () => settings.autoHide], ['toggleInvert', 'Ctrl+Shift+I', () => settings.invert]]],
@@ -1008,7 +1127,7 @@ function buildToolbars() {
   fill('#pageTools', [['rotateLeft', ICONS.rotL, {needsDoc: 1}], ['rotateRight', ICONS.rotR, {needsDoc: 1}], ['deletePages', ICONS.trash, {needsDoc: 1}],
     ['extractPages', ICONS.extract, {needsDoc: 1}], ['insertPdf', ICONS.insert, {needsDoc: 1}]]);
   const tools = $('#tools'); tools.innerHTML = '';
-  [['toolSelect', 'select'], ['toolHand', 'hand'], '-', ['toolHighlight', 'highlight'], ['toolPen', 'pen'], ['toolNote', 'note'], ['toolErase', 'erase'], '-']
+  [['toolSelect', 'select'], ['toolHand', 'hand'], '-', ['toolHighlight', 'highlight'], ['toolPen', 'pen'], ['toolText', 'text'], ['toolNote', 'note'], ['toolErase', 'erase'], '-']
     .forEach(r => {
       if (r === '-') { const s = document.createElement('div'); s.className = 'sep'; return tools.append(s); }
       tools.append(makeBtn(r[0], ICONS[r[1]], {tool: r[1]}));
@@ -1016,13 +1135,17 @@ function buildToolbars() {
   tools.append(makeBtn('rotateLeft', ICONS.rotL, {needsDoc: 1}), makeBtn('rotateRight', ICONS.rotR, {needsDoc: 1}), makeBtn('deletePages', ICONS.trash, {needsDoc: 1}));
   $$('[data-needs-doc]').forEach(b => b.setAttribute('data-needs-doc', ''));
   $('#swatches').innerHTML = COLORS.map(c => `<button class="swatch${c === settings.color ? ' active' : ''}" data-color="${c}" style="background:${c}" title="${esc(t('ui.color'))} ${c}"></button>`).join('');
+  $('#textOpts').innerHTML = `<select id="textFont" title="${esc(t('ui.font'))}">${Object.keys(TEXT_FONTS).map(f => `<option value="${f}">${FONT_NAMES[f]}</option>`).join('')}</select>` +
+    `<select id="textSize" title="${esc(t('ui.fontSize'))}">${TEXT_SIZES.map(s => `<option value="${s}">${s} pt</option>`).join('')}</select>`;
+  $('#textOpts').append(makeBtn('textBold', ICONS.bold));
+  syncTextOpts();
   $('#zOutBtn').title = tip('zoomOut'); $('#zInBtn').title = tip('zoomIn');
   $('#prevBtn').title = tip('prevPage'); $('#nextBtn').title = tip('nextPage');
 }
 document.addEventListener('mousedown', e => { if (e.target.closest('.ibtn,.cta,.swatch')) e.preventDefault(); });
 document.addEventListener('click', e => {
   const sw = e.target.closest('[data-color]');
-  if (sw) { settings.color = sw.dataset.color; $$('.swatch').forEach(s => s.classList.toggle('active', s === sw)); saveState(); return; }
+  if (sw) { settings[colorKey()] = sw.dataset.color; syncTextOpts(); saveState(); if (textEd) textEd.style(); return; }
   const b = e.target.closest('[data-act]'); if (b && !b.disabled) A[b.dataset.act]();
 });
 $$('#dockTabs button').forEach(b => b.onclick = () => { settings.dock = true; settings.dockTab = b.dataset.tab; applySettings(); });
@@ -1042,6 +1165,7 @@ const typing = () => { const a = document.activeElement; return a && (a.tagName 
 window.addEventListener('keydown', e => {
   if (window.Shortcuts && Shortcuts.recording) return;   // Settings → Shortcuts is taking a key
   if (e.key === 'Escape') {
+    if (textEd) return textEd.commit(false);   // cancels the text being written
     if ($('#modal').classList.contains('show')) $('#modalClose').click();   // also cancels a password prompt
     else if (menuOpen) closeMenus();
     else if ($('#findbar').classList.contains('show')) closeFind();
@@ -1218,7 +1342,7 @@ if (window.Native) {
       ctx.ann = ann ? {pg: pg._pg, k} : null;
       return [Native.copyTextItem(), ...(ann ? [null, {id: 'ctx:delAnn', label: t('ctx.deleteAnnot')}] : []), null,
         item('rotateLeft'), item('rotateRight'), item('deletePages'), item('exportPng'), null,
-        ...['select', 'hand', 'highlight', 'pen', 'note'].map(n => item(TOOL_ACT[n], {checked: tool === n}))];
+        ...['select', 'hand', 'highlight', 'pen', 'text', 'note'].map(n => item(TOOL_ACT[n], {checked: tool === n}))];
     }
     return null;
   });
@@ -1258,5 +1382,5 @@ if (window.Native) {
 })();
 
 // Exposed for automated UI tests in a browser.
-window.__pd = {openNoteEditor, openFiles, A, cur, buildPdf, setZoom, goToPage, addAnnot, annotAt, movePages, deletePages, rotatePages, insertPdf, undoRedo,
+window.__pd = {openNoteEditor, openTextEditor, textDown, getTextEd: () => textEd, settings: () => settings, openFiles, A, cur, buildPdf, setZoom, goToPage, addAnnot, annotAt, movePages, deletePages, rotatePages, insertPdf, undoRedo,
   find, runFind, findStep, settings: () => settings, pdfjsLib, PDF_OPTS};

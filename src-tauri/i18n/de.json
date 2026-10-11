@@ -192,5 +192,10 @@
   "load.read": "Datei wird gelesen",
   "load.open": "PDF wird geöffnet",
   "load.pages": "Seiten werden geladen",
-  "load.prepare": "Wird vorbereitet"
+  "load.prepare": "Wird vorbereitet",
+  "a.toolText": "Text",
+  "a.textBold": "Fetter Text",
+  "ui.textPh": "Text eingeben…",
+  "ui.font": "Schriftart",
+  "ui.fontSize": "Schriftgröße"
 }

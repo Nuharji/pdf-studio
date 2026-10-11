@@ -68,6 +68,18 @@ pub enum Annot {
     /// Note box at (x, y) with size w×h, rotated by `rot` degrees (so it reads upright), text lines at offsets.
     #[serde(rename = "note")]
     Note { x: f64, y: f64, w: f64, h: f64, rot: f64, c: String, size: f64, lines: Vec<NoteLine> },
+    /// Text written onto the page (text tool): lines at their positions, in a standard font
+    /// ("helv", "times" or "cour", optionally bold), rotated by `rot` degrees so it reads upright.
+    #[serde(rename = "text")]
+    Text { rot: f64, c: String, size: f64, font: String, #[serde(default)] bold: bool, lines: Vec<NoteLine> },
+}
+
+/// Standard fonts every PDF reader has, by the UI's names: (key, resource name, base font).
+const FONTS: [(&str, &str, &str); 6] = [("helv", "CSF_helv", "Helvetica"), ("helvB", "CSF_helvB", "Helvetica-Bold"),
+    ("times", "CSF_times", "Times-Roman"), ("timesB", "CSF_timesB", "Times-Bold"), ("cour", "CSF_cour", "Courier"), ("courB", "CSF_courB", "Courier-Bold")];
+fn font_res(font: &str, bold: bool) -> &'static str {
+    let key = format!("{font}{}", if bold { "B" } else { "" });
+    FONTS.iter().find(|f| f.0 == key).map_or("CSF_helv", |f| f.1)
 }
 
 #[derive(Deserialize)]
@@ -134,6 +146,14 @@ fn annot_ops(list: &[Annot]) -> String {
                         n(*size), n(cos), n(sin), n(-sin), n(cos), n(l.x), n(l.y), pdf_text(&l.text));
                 }
             }
+            Annot::Text { rot, c, size, font, bold, lines } => {
+                let (cr, cg, cb) = rgb(c);
+                let (sin, cos) = rot.to_radians().sin_cos();
+                for l in lines.iter().filter(|l| !l.text.is_empty()) {
+                    s += &format!("BT /{} {} Tf {} {} {} rg {} {} {} {} {} {} Tm {} Tj ET\n",
+                        font_res(font, *bold), n(*size), n(cr), n(cg), n(cb), n(cos), n(sin), n(-sin), n(cos), n(l.x), n(l.y), pdf_text(&l.text));
+                }
+            }
         }
     }
     s + "Q\n"
@@ -187,6 +207,8 @@ pub fn build(sources: &[Vec<u8>], pages: &[PageReq]) -> Result<Vec<u8>, String> 
     let mut used = std::collections::HashSet::new();
     let helv = base.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "Encoding" => "WinAnsiEncoding" });
     let hl_gs = base.add_object(dictionary! { "Type" => "ExtGState", "ca" => 0.4, "BM" => "Multiply" });
+    let fonts: Vec<(&str, ObjectId)> = FONTS.iter().map(|(_, res, name)| (*res, base.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "Type1", "BaseFont" => *name, "Encoding" => "WinAnsiEncoding" }))).collect();
     for p in pages {
         let src_id = *page_ids.get(p.src).and_then(|v| v.get(p.index)).ok_or("page missing")?;
         // A page used twice gets its own copy (each can have its own rotation and annotations).
@@ -208,7 +230,8 @@ pub fn build(sources: &[Vec<u8>], pages: &[PageReq]) -> Result<Vec<u8>, String> 
         };
         let mut resources = resources;
         if contents_extra.is_some() {
-            for (key, name, obj) in [(&b"Font"[..], &b"CSHelv"[..], helv), (b"ExtGState", b"CSHl", hl_gs)] {
+            let text_fonts = fonts.iter().map(|(res, id)| (&b"Font"[..], res.as_bytes(), *id));
+            for (key, name, obj) in [(&b"Font"[..], &b"CSHelv"[..], helv), (b"ExtGState", b"CSHl", hl_gs)].into_iter().chain(text_fonts) {
                 let mut sub = match resources.get(key).cloned() {
                     Ok(Object::Reference(r)) => base.get_dictionary(r).cloned().unwrap_or_default(),
                     Ok(Object::Dictionary(d)) => d,
@@ -297,7 +320,9 @@ mod tests {
                 Annot::Highlight { r: [10.0, 10.0, 110.0, 40.0], c: "#ffd400".into() },
                 Annot::Ink { p: vec![[0.0, 0.0], [50.0, 50.0], [80.0, 20.0]], w: 2.0, c: "#e5384f".into() },
                 Annot::Note { x: 200.0, y: 300.0, w: 120.0, h: 40.0, rot: 0.0, c: "#ffd400".into(), size: 11.0,
-                    lines: vec![NoteLine { x: 206.0, y: 320.0, text: "Grüße (1) €".into() }] } ] },
+                    lines: vec![NoteLine { x: 206.0, y: 320.0, text: "Grüße (1) €".into() }] },
+                Annot::Text { rot: 0.0, c: "#1e5bd6".into(), size: 18.0, font: "times".into(), bold: true,
+                    lines: vec![NoteLine { x: 50.0, y: 700.0, text: "Hallo".into() }, NoteLine { x: 50.0, y: 678.0, text: String::new() }] } ] },
             PageReq { src: 0, index: 0, rot: 0, annots: vec![] },
             PageReq { src: 0, index: 0, rot: 180, annots: vec![] },
         ];
@@ -314,6 +339,10 @@ mod tests {
         let annotated = text_of(&doc, ids[1]);
         assert!(annotated.contains("/CSHl gs") && annotated.contains(" re f") && annotated.contains(" l S") && annotated.contains("/CSHelv"));
         assert!(annotated.contains("(Gr\\374\\337e \\(1\\) \\200)"), "{annotated}");
+        assert!(annotated.contains("BT /CSF_timesB 18 Tf 0.118 0.357 0.839 rg 1 0 -0 1 50 700 Tm (Hallo) Tj ET"), "{annotated}");
+        let res = doc.get_dictionary(ids[1]).unwrap().get(b"Resources").unwrap().as_dict().unwrap();
+        let fonts = res.get(b"Font").unwrap().as_dict().unwrap();
+        assert!(fonts.has(b"CSF_timesB") && fonts.has(b"CSF_cour"));
         // Inherited MediaBox/Resources survive re-parenting.
         let p0 = doc.get_dictionary(ids[0]).unwrap();
         assert!(p0.has(b"MediaBox") && p0.has(b"Resources"));

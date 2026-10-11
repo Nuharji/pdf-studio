@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.0 — 2026-10-11
+- New: Text tool (T). Click on a page and type: the text is written into the PDF itself in Helvetica, Times or Courier, with size, bold and color from the options bar. Enter finishes, Shift+Enter starts a new line, Escape cancels. Click a text to edit it, drag it to move it; undo works for all of it. The saved file shows the text exactly where it was on screen.
+- The note tool moved to the key N.
+
 ## 1.6.0 — 2026-10-11
 - Loading information while a PDF opens: a card with the file name, the current step (reading the file, opening the PDF, loading pages, preparing) and a real progress bar — megabytes read and pages loaded (e.g. 37 / 120). It only appears when opening takes a moment.
 

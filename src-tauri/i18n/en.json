@@ -192,5 +192,10 @@
   "load.read": "Reading file",
   "load.open": "Opening PDF",
   "load.pages": "Loading pages",
-  "load.prepare": "Preparing"
+  "load.prepare": "Preparing",
+  "a.toolText": "Text",
+  "a.textBold": "Bold Text",
+  "ui.textPh": "Type text…",
+  "ui.font": "Font",
+  "ui.fontSize": "Font size"
 }
