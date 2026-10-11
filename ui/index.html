@@ -167,6 +167,9 @@ body.tool-highlight .page .annots,body.tool-pen .page .annots,body.tool-note .pa
 body.tool-note .page .annots{cursor:text}
 body.tool-erase .page .annots{cursor:pointer}
 body.tool-erase .page .annots .ann:hover{opacity:.45;outline:2px dashed var(--danger)}
+.spell-marks{position:absolute;z-index:6;box-sizing:border-box;overflow:hidden;pointer-events:none;color:transparent;margin:0;border:0}
+.spell-marks mark{background:none;color:transparent;text-decoration:underline wavy;text-decoration-thickness:1.5px;text-underline-offset:3px;text-decoration-skip-ink:none}
+.spell-marks mark.sp{text-decoration-color:#e5484d}.spell-marks mark.gr{text-decoration-color:#3d8ee8}
 .note-edit{position:absolute;z-index:5;min-width:160px;min-height:54px;resize:both;background:#fff7b3;color:#222;border:1px solid #d9b500;border-radius:3px;font:13px/1.35 "Segoe UI",system-ui,sans-serif;padding:5px 7px;outline:2px solid #e5384f;box-shadow:0 4px 14px rgba(0,0,0,.25)}
 /* pdf.js text layer (from pdf_viewer.css) */
 .textLayer{position:absolute;text-align:initial;inset:0;overflow:clip;opacity:1;line-height:1;text-size-adjust:none;forced-color-adjust:none;transform-origin:0 0;caret-color:CanvasText;z-index:1}
@@ -381,6 +384,7 @@ body.invert .thumb canvas{filter:invert(.9) hue-rotate(180deg)}
 <input type="file" id="fileIn" accept=".pdf,application/pdf" multiple hidden>
 
 <script src="native.js"></script>
+<script src="spellfield.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

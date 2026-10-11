@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 — 2026-10-11
+- Spelling & grammar check while typing a note, German and English, entirely on your PC: misspelled words get a red wavy underline, grammar hints a blue one. Right-click for suggestions, “Add to dictionary” (a personal dictionary shared by all Studio apps) or “Ignore”.
+- Settings → Viewer → Spelling & grammar: Automatic (German + English), German, English or Off.
+- Fixed: right-clicking in a note being typed closed it (the context menu took the focus).
+- The portable .zip now includes the dictionaries (separate files with their own licenses, see dictionaries/README.md); the bare portable .exe has no spell check.
+
 ## 1.2.3 — 2026-10-11
 - Fixed: PDFs protected only by an owner password (they open without asking) are now shown as protected in the Properties panel.
 - Password-protected PDFs: properties and bookmarks are read with the password you entered.

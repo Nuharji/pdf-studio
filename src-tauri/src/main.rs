@@ -3,6 +3,7 @@
 
 mod pdfbuild;
 mod pdfinfo;
+mod spell;
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -242,6 +243,10 @@ fn main() {
             pdfbuild::pdf_forget,
             pdfbuild::pdf_build,
             pdfinfo::pdf_info,
+            spell::spell_check,
+            spell::spell_suggest,
+            spell::spell_add,
+            spell::spell_ready,
             context_menu,
             clipboard_read,
             clipboard_write,

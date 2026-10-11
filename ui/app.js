@@ -33,7 +33,7 @@ const fmtSize = b => b >= 1048576 ? (b / 1048576).toLocaleString(lang, {maximumF
 /* ================= Settings & state ================= */
 const THEMES = ['dark', 'light', 'github', 'github-dark'];
 const COLORS = ['#FFD400', '#7CE38B', '#62B3FF', '#FF7AB6', '#E5384F', '#1F2328'];
-const DEF = {lang: 'auto', theme: 'dark', zoomMode: 'fit-width', invert: false, dock: true, dockTab: 'pages', reopen: true, color: '#FFD400'};
+const DEF = {lang: 'auto', theme: 'dark', zoomMode: 'fit-width', invert: false, dock: true, dockTab: 'pages', reopen: true, color: '#FFD400', spell: 'auto'};
 let settings = {...DEF}, recent = [], docs = [], active = -1, tool = 'select', booted = false, docSeq = 0, pageSeq = 0;
 const cur = () => docs[active];
 const effectiveLang = () => settings.lang === 'auto'
@@ -430,16 +430,19 @@ pagesEl.addEventListener('pointerdown', e => {
   svg.addEventListener('pointermove', move);
   svg.addEventListener('pointerup', up, {once: true});
 });
+const spellIgnored = new Set();   // spelling issues ignored in notes this session
 function openNoteEditor(el, [x, y]) {
   const ta = document.createElement('textarea');
   ta.className = 'note-edit'; ta.placeholder = t('ui.notePh');
   ta.style.left = x + 'px'; ta.style.top = y + 'px';
   el.append(ta); ta.focus();
+  // Spelling & grammar while typing (spellfield.js; right-click an underline for suggestions).
+  if (window.SpellField) SpellField.attach(ta, {lang: () => settings.spell, fallback: () => lang, ignored: spellIgnored});
   let done = false;
   const commit = keep => {
     if (done) return; done = true;
     const text = ta.value.replace(/\s+$/, '');
-    ta.remove();
+    ta.remove(); if (ta.nextElementSibling && ta.nextElementSibling.classList.contains('spell-marks')) ta.nextElementSibling.remove();
     if (keep && text) { const [px, py] = el._vp.convertToPdfPoint(x, y); addAnnot(el._pg, {t: 'note', x: px, y: py, text, c: settings.color}); }
   };
   ta.addEventListener('keydown', e => {
@@ -447,7 +450,7 @@ function openNoteEditor(el, [x, y]) {
     if (e.key === 'Escape') commit(false);
     if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) { e.preventDefault(); commit(true); }
   });
-  ta.addEventListener('blur', () => commit(true));
+  ta.addEventListener('blur', () => { if (document.hasFocus()) commit(true); });
   ta.addEventListener('pointerdown', e => e.stopPropagation());
 }
 /* Hand tool: drag to pan */
@@ -1089,7 +1092,8 @@ function renderSettings() {
         `<button class="theme-card${settings.theme === th ? ' active' : ''}" data-theme-pick="${th}">${mock(th)}
          <div class="theme-name">${esc(t('theme.' + th))}<span>${settings.theme === th ? '&#10003;' : ''}</span></div></button>`).join('') +
       `</div><h3>${t('set.reading')}</h3>${sw('invert', t('set.invert'))}`,
-    viewer: `<h3>${t('set.defaultZoom')}</h3><select class="wide-sel" data-sel="zoomMode">${opt('fit-width', t('ui.fitWidthOpt'), settings.zoomMode)}${opt('fit-page', t('ui.fitPageOpt'), settings.zoomMode)}${opt('actual', '100 %', settings.zoomMode)}</select>`
+    viewer: `<h3>${t('set.defaultZoom')}</h3><select class="wide-sel" data-sel="zoomMode">${opt('fit-width', t('ui.fitWidthOpt'), settings.zoomMode)}${opt('fit-page', t('ui.fitPageOpt'), settings.zoomMode)}${opt('actual', '100 %', settings.zoomMode)}</select>
+      <h3>${t('set.spell')}</h3><p class="hint">${t('set.spellHint')}</p><select class="wide-sel" data-sel="spell">${opt('auto', t('set.spellAuto'), settings.spell)}${opt('de', 'Deutsch', settings.spell)}${opt('en', 'English', settings.spell)}${opt('off', t('set.spellOff'), settings.spell)}</select>`
   };
   $('#modalTitle').textContent = t('set.title');
   $('#modalBody').innerHTML = `<div class="prefs"><nav>${['general', 'appearance', 'viewer'].map(k =>
@@ -1159,6 +1163,11 @@ if (window.Native) {
   const item = (act, extra = {}) => ({id: act, label: t('a.' + act), accel: keyOf(act) || null, enabled: !!cur(), ...extra});
   const ctx = {tab: -1, ann: null};
   Native.setProvider(e => {
+    if (e.target.classList && e.target.classList.contains('note-edit')) {
+      const sp = window.SpellField && SpellField.menu(e, t);
+      if (sp) return sp.then(items => [...items, null, ...Native.fieldItems(e.target)]);
+      return null;
+    }
     const tab = e.target.closest('.tab');
     if (tab) {
       ctx.tab = [...$('#tabs').children].indexOf(tab);
@@ -1186,6 +1195,7 @@ if (window.Native) {
     return null;
   });
   Native.setHandler(async id => {
+    if (id.startsWith('spf:')) return SpellField.action(id);
     if (id === 'tab:close') return closeTab(ctx.tab);
     if (id === 'tab:others') { const keep = docs[ctx.tab]; for (const x of [...docs]) if (x !== keep) await closeTab(docs.indexOf(x)); return; }
     if (id === 'ctx:delAnn' && ctx.ann) { const d = cur(); pushHistory(d); d.annots[ctx.ann.pg.id].splice(ctx.ann.k, 1); changed(); return; }
@@ -1220,5 +1230,5 @@ if (window.Native) {
 })();
 
 // Exposed for automated UI tests in a browser.
-window.__pd = {openFiles, A, cur, buildPdf, setZoom, goToPage, addAnnot, annotAt, movePages, deletePages, rotatePages, insertPdf, undoRedo,
+window.__pd = {openNoteEditor, openFiles, A, cur, buildPdf, setZoom, goToPage, addAnnot, annotAt, movePages, deletePages, rotatePages, insertPdf, undoRedo,
   find, runFind, findStep, settings: () => settings, pdfjsLib, PDF_OPTS};
