@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.9.1 — 2026-10-11
+- Fixed: a note or text that was still being typed was left out when you saved (Save button or Ctrl+S), printed or exported, and was lost without a question when the tab or window was closed. It is now finished and kept first, like pressing Enter.
+
 ## 1.9.0 — 2026-10-11
 - New: Insert Blank Pages (Pages menu, Ctrl+Shift+N, page panel, right-click on a thumbnail). Choose the size (like the current page, A4, A5, A3, Letter or Legal), portrait or landscape, how many pages and where they go (after or before the current page, at the beginning or the end). The pages can be written and drawn on like any other page; undo removes them. The dialog remembers your last choice.
 

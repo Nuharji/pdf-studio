@@ -136,6 +136,7 @@ async function openFiles(list) { for (const f of list) await openFileInfo(f); }
 
 /* ================= Tabs ================= */
 function activate(i, fresh = false) {
+  if (docs[i] !== cur()) finishEditors();
   const prev = cur();
   if (prev && prev !== docs[i]) prev.scroll = viewer.scrollTop;
   active = i;
@@ -153,6 +154,7 @@ function activate(i, fresh = false) {
   buildThumbs(); buildOutline(); buildProps(); renderTabs(); updateUI(); saveState();
 }
 async function closeTab(i) {
+  if (i === active) finishEditors();
   const d = docs[i];
   if (d.dirty && !await ask(t('confirm.close', {name: d.name}), t('confirm.ok'))) return;
   docs.splice(i, 1);
@@ -473,6 +475,10 @@ pagesEl.addEventListener('pointerdown', e => {
   svg.addEventListener('pointermove', move);
   svg.addEventListener('pointerup', up, {once: true});
 });
+/* An open note or text editor is finished (kept) before saving, printing, closing or switching documents:
+   the toolbar buttons and shortcuts don't take the focus away from it, so its blur doesn't do it. */
+let noteEd = null;
+function finishEditors() { if (textEd) textEd.commit(true); if (noteEd) noteEd.commit(true); }
 const spellIgnored = new Set();   // spelling issues ignored in notes this session
 function openNoteEditor(el, [x, y]) {
   const ta = document.createElement('textarea');
@@ -483,11 +489,12 @@ function openNoteEditor(el, [x, y]) {
   if (window.SpellField) SpellField.attach(ta, {lang: () => settings.spell, fallback: () => lang, ignored: spellIgnored});
   let done = false;
   const commit = keep => {
-    if (done) return; done = true;
-    const text = ta.value.replace(/\s+$/, '');
-    ta.remove(); if (ta.nextElementSibling && ta.nextElementSibling.classList.contains('spell-marks')) ta.nextElementSibling.remove();
+    if (done) return; done = true; noteEd = null;
+    const text = ta.value.replace(/\s+$/, ''), marks = ta.nextElementSibling;
+    ta.remove(); if (marks && marks.classList.contains('spell-marks')) marks.remove();
     if (keep && text) { const [px, py] = el._vp.convertToPdfPoint(x, y); addAnnot(el._pg, {t: 'note', x: px, y: py, text, c: settings.color}); }
   };
+  noteEd = {commit};
   ta.addEventListener('keydown', e => {
     e.stopPropagation();
     if (e.key === 'Escape') commit(false);
@@ -619,8 +626,8 @@ function openTextEditor(el, p, k = -1) {
   let done = false;
   const commit = keep => {
     if (done) return; done = true; textEd = null;
-    const text = ta.value.replace(/\s+$/, '');
-    ta.remove(); if (ta.nextElementSibling && ta.nextElementSibling.classList.contains('spell-marks')) ta.nextElementSibling.remove();
+    const text = ta.value.replace(/\s+$/, ''), marks = ta.nextElementSibling;
+    ta.remove(); if (marks && marks.classList.contains('spell-marks')) marks.remove();
     const a = {t: 'text', x: 0, y: 0, text, size: settings.textSize, font: settings.textFont, bold: settings.textBold, c: settings.textColor};
     if (orig) {
       list.splice(k, 0, orig);
@@ -832,6 +839,7 @@ function annotsPdf(d, p) {
   });
 }
 async function buildPdf(d, onlyIds = null) {
+  if (d === cur()) finishEditors();   // the note or text being typed belongs in the file
   // Files that needed a password to open keep their protection: they aren't re-saved unencrypted.
   if (d.sources.some(s => s.encrypted)) throw new Error('encrypted');
   const list = onlyIds ? d.pages.filter(p => onlyIds.has(p.id)) : d.pages;
@@ -1516,7 +1524,7 @@ if (window.Native) {
   applySettings(); setTool('select'); renderTabs(); renderRecent(); updateUI();
   if (invoke) {
     window.__TAURI__.window.getCurrentWindow().onCloseRequested(async ev => {
-      saveState();
+      finishEditors(); saveState();
       if (docs.some(d => d.dirty) && !await ask(t('confirm.quit'), t('confirm.quitOk'))) ev.preventDefault();
     });
     window.__TAURI__.event.listen('open-files', e => openFiles(e.payload));
