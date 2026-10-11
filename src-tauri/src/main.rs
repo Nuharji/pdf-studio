@@ -95,10 +95,26 @@ async fn pick_pdfs(app: AppHandle) -> Vec<FileInfo> {
 }
 
 #[tauri::command]
-async fn read_file(path: String) -> Result<Response, String> {
-    fs::read(&path)
-        .map(Response::new)
-        .map_err(|e| format!("{path}: {e}"))
+async fn read_file(app: AppHandle, path: String, progress: Option<u64>) -> Result<Response, String> {
+    read_progress(&app, &path, progress).map(Response::new)
+}
+
+/// Reads a file in pieces; with `id`, the UI gets "load-progress" events ({id, done, total}) for its loading bar.
+pub fn read_progress(app: &AppHandle, path: &str, id: Option<u64>) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let err = |e: std::io::Error| format!("{path}: {e}");
+    let mut f = fs::File::open(path).map_err(err)?;
+    let total = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let mut out = Vec::with_capacity(total as usize);
+    let Some(id) = id else { f.read_to_end(&mut out).map_err(err)?; return Ok(out) };
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = f.read(&mut buf).map_err(err)?;
+        if n == 0 { break; }
+        out.extend_from_slice(&buf[..n]);
+        let _ = app.emit("load-progress", serde_json::json!({"id": id, "phase": "read", "done": out.len(), "total": total}));
+    }
+    Ok(out)
 }
 
 /// Writes the raw request body. Header `x-path` saves to that file; otherwise a save

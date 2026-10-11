@@ -48,7 +48,7 @@ function saveState() {
 
 /* ================= File access (native or browser) ================= */
 const enc = s => encodeURIComponent(s || '');
-async function readPath(path) { return new Uint8Array(await invoke('read_file', {path})); }
+async function readPath(path, job = null) { return new Uint8Array(await invoke('read_file', {path, progress: job ? job.id : null})); }
 async function writeBytes(bytes, {path = null, name, filter = 'PDF', ext = 'pdf', mime = 'application/pdf'}) {
   if (invoke) {
     return invoke('save_binary', bytes, {headers: {'x-path': enc(path), 'x-name': enc(name), 'x-filter': enc(filter), 'x-ext': enc(ext)}});
@@ -71,7 +71,7 @@ async function pickFiles() {
     inp.click();
   });
 }
-const bytesOf = async f => f.bytes || readPath(f.path);
+const bytesOf = async (f, job) => f.bytes || readPath(f.path, job);
 
 /* ================= Loading documents ================= */
 function askPassword(name, wrong) {
@@ -85,7 +85,9 @@ function askPassword(name, wrong) {
     inp.onkeydown = e => { if (e.key === 'Enter') { const v = inp.value; closeModal(); resolve(v); } };
   });
 }
-async function loadPdf(bytes, name) {
+/* job: the loading bar (loadbar.js) — the steps open, pages and prepare fill it from 30 % on. */
+async function loadPdf(bytes, name, job = null) {
+  if (job) job.step(t('load.open'), .3, .4, {busy: true});
   const task = pdfjsLib.getDocument({...PDF_OPTS, data: bytes.slice()});
   let password = null;
   task.onPassword = async (update, reason) => {
@@ -94,7 +96,9 @@ async function loadPdf(bytes, name) {
   };
   const pdf = await task.promise;
   const proxies = [];
-  for (let i = 1; i <= pdf.numPages; i++) proxies.push(await pdf.getPage(i));
+  if (job) job.step(t('load.pages'), .4, .95);
+  for (let i = 1; i <= pdf.numPages; i++) { proxies.push(await pdf.getPage(i)); if (job) job.set(i / pdf.numPages, `${i} / ${pdf.numPages}`); }
+  if (job) job.step(t('load.prepare'), .95, 1, {busy: true});
   // Rust keeps a copy for building the saved file (pdfbuild.rs); the UI then only sends page lists.
   const rid = invoke ? await invoke('pdf_cache', bytes) : null;
   // Properties and bookmarks are read in Rust too (pdfinfo.rs); the password is only passed on, not kept.
@@ -112,11 +116,14 @@ async function openFileInfo(f) {
     const i = docs.findIndex(d => d.path === f.path);
     if (i >= 0) return activate(i);
   }
-  let bytes;
-  try { bytes = await bytesOf(f); } catch (e) { return toast(t('toast.missing', {name: f.name})); }
-  let src;
-  try { src = await loadPdf(bytes, f.name); }
-  catch (e) { if (!/destroy|abort/i.test(String(e && (e.name + e.message)))) toast(t('toast.openFail', {name: f.name, e: e.message || e})); return; }
+  let bytes, src;
+  const job = window.LoadBar ? LoadBar.start(f.name) : null;
+  try {
+    if (job) job.step(t('load.read'), 0, .3);
+    try { bytes = await bytesOf(f, job); } catch (e) { return toast(t('toast.missing', {name: f.name})); }
+    try { src = await loadPdf(bytes, f.name, job); }
+    catch (e) { if (!/destroy|abort/i.test(String(e && (e.name + e.message)))) toast(t('toast.openFail', {name: f.name, e: e.message || e})); return; }
+  } finally { if (job) job.done(); }
   const d = {id: ++docSeq, name: f.name, path: f.path, size: f.size || bytes.length, sources: [src], pages: pagesOf(src, 0),
     annots: {}, dirty: false, history: [], future: [], cleanDepth: 0, selected: new Set(), current: 0, zoom: 1,
     zoomMode: settings.zoomMode, scroll: 0};

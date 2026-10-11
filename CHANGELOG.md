@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.6.0 — 2026-10-11
+- Loading information while a PDF opens: a card with the file name, the current step (reading the file, opening the PDF, loading pages, preparing) and a real progress bar — megabytes read and pages loaded (e.g. 37 / 120). It only appears when opening takes a moment.
+
 ## 1.5.0 — 2026-10-11
 - New: Settings → Shortcuts. Every menu command can get its own key: click it and press the new combination (with Ctrl or Alt, or a function key); Backspace removes a shortcut, ↺ or “Reset all” brings the defaults back. A key that another command used is moved (you get a note); system keys like Copy stay fixed. Menus, tooltips and Help → Keyboard Shortcuts show your keys.
 

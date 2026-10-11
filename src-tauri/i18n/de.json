@@ -188,5 +188,9 @@
   "keys.press": "Tasten drücken …",
   "keys.needMod": "Bitte mit Strg oder Alt kombinieren (oder eine F-Taste nehmen) — sonst stört das Kürzel beim Tippen.",
   "keys.taken": "{k} gehörte zu „{a}“ — dort entfernt.",
-  "keys.fixed": "{k} ist fest für „{a}“ vergeben."
+  "keys.fixed": "{k} ist fest für „{a}“ vergeben.",
+  "load.read": "Datei wird gelesen",
+  "load.open": "PDF wird geöffnet",
+  "load.pages": "Seiten werden geladen",
+  "load.prepare": "Wird vorbereitet"
 }
