@@ -197,5 +197,7 @@
   "a.textBold": "Fetter Text",
   "ui.textPh": "Text eingeben…",
   "ui.font": "Schriftart",
-  "ui.fontSize": "Schriftgröße"
+  "ui.fontSize": "Schriftgröße",
+  "a.highlightSelection": "Ausgewählten Text markieren",
+  "toast.noSelection": "Zuerst Text auf einer Seite auswählen."
 }

@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.8.0 — 2026-10-11
+- New: highlight the text that is already in a PDF. With the highlight tool (M), a drag that starts on text follows the letters and lines like a text selection and highlights exactly that text; a drag beside the text still draws a box (the cursor shows which). With the select tool, select text and press M, Ctrl+Shift+H or right-click → Highlight Selected Text. The highlight is saved into the PDF; it can be erased and undone as one piece.
+
 ## 1.7.0 — 2026-10-11
 - New: Text tool (T). Click on a page and type: the text is written into the PDF itself in Helvetica, Times or Courier, with size, bold and color from the options bar. Enter finishes, Shift+Enter starts a new line, Escape cancels. Click a text to edit it, drag it to move it; undo works for all of it. The saved file shows the text exactly where it was on screen.
 - The note tool moved to the key N.

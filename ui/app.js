@@ -363,6 +363,12 @@ function drawAnnots(el) {
       const [x1, y1] = vp.convertToViewportPoint(a.r[0], a.r[1]), [x2, y2] = vp.convertToViewportPoint(a.r[2], a.r[3]);
       return `<rect class="ann hl" data-k="${k}" x="${Math.min(x1, x2)}" y="${Math.min(y1, y2)}" width="${Math.abs(x2 - x1)}" height="${Math.abs(y2 - y1)}" fill="${a.c}" fill-opacity=".4"/>`;
     }
+    if (a.t === 'hlt') {   // highlighted text: one bar per line
+      return `<g class="ann hl" data-k="${k}" fill="${a.c}" fill-opacity=".4">${a.rs.map(r => {
+        const [x1, y1] = vp.convertToViewportPoint(r[0], r[1]), [x2, y2] = vp.convertToViewportPoint(r[2], r[3]);
+        return `<rect x="${Math.min(x1, x2)}" y="${Math.min(y1, y2)}" width="${Math.abs(x2 - x1)}" height="${Math.abs(y2 - y1)}"/>`;
+      }).join('')}</g>`;
+    }
     if (a.t === 'ink') {
       const pts = a.p.map(p => vp.convertToViewportPoint(p[0], p[1]).map(v => v.toFixed(1)).join(',')).join(' ');
       return `<polyline class="ann" data-k="${k}" points="${pts}" fill="none" stroke="${a.c}" stroke-width="${a.w * vp.scale}" stroke-linecap="round" stroke-linejoin="round"/>`;
@@ -392,6 +398,11 @@ function annotAt(el, clientX, clientY) {
     if (a.t === 'hl') {
       const [x1, y1] = vp.convertToViewportPoint(a.r[0], a.r[1]), [x2, y2] = vp.convertToViewportPoint(a.r[2], a.r[3]);
       if (x >= Math.min(x1, x2) && x <= Math.max(x1, x2) && y >= Math.min(y1, y2) && y <= Math.max(y1, y2)) return k;
+    } else if (a.t === 'hlt') {
+      if (a.rs.some(r => {
+        const [x1, y1] = vp.convertToViewportPoint(r[0], r[1]), [x2, y2] = vp.convertToViewportPoint(r[2], r[3]);
+        return x >= Math.min(x1, x2) && x <= Math.max(x1, x2) && y >= Math.min(y1, y2) && y <= Math.max(y1, y2);
+      })) return k;
     } else if (a.t === 'ink') {
       for (const p of a.p) { const [px, py] = vp.convertToViewportPoint(p[0], p[1]); if (Math.hypot(px - x, py - y) < 8) return k; }
     } else if (a.t === 'note') {
@@ -423,6 +434,7 @@ pagesEl.addEventListener('pointerdown', e => {
     return;
   }
   e.preventDefault();
+  if (tool === 'highlight' && textAt(el, e.clientX, e.clientY)) return highlightDrag(e);
   if (tool === 'note') return openNoteEditor(el, local(e));
   if (tool === 'text') return textDown(e, el, local(e));
   svg.setPointerCapture(e.pointerId);
@@ -484,6 +496,85 @@ function openNoteEditor(el, [x, y]) {
   ta.addEventListener('blur', () => { if (document.hasFocus()) commit(true); });
   ta.addEventListener('pointerdown', e => e.stopPropagation());
 }
+/* ---- Highlighting existing text: a text selection becomes highlight bars, one per line, on each page it touches. ---- */
+const textAt = (el, x, y) => [...el.querySelectorAll('.textLayer span:not(.markedContent)')].some(s => {
+  const r = s.getBoundingClientRect(); return r.width && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+});
+/* The current text selection, if it lies in the pages. */
+function selectionRange() {
+  const s = getSelection();
+  if (!s.rangeCount || s.isCollapsed) return null;
+  const r = s.getRangeAt(0), n = r.commonAncestorContainer, host = n.nodeType === 1 ? n : n.parentElement;
+  return host && pagesEl.contains(host) && r.toString().trim() ? r : null;
+}
+/* Rectangles on one line (overlapping vertically, close horizontally) become one bar. */
+function mergeLines(rects) {
+  rects.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+  const out = [];
+  for (const r of rects) {
+    const h = r[3] - r[1];
+    const m = out.find(o => Math.min(o[3], r[3]) - Math.max(o[1], r[1]) >= .5 * Math.min(h, o[3] - o[1]) && r[0] <= o[2] + h && r[2] >= o[0] - h);
+    if (m) { m[0] = Math.min(m[0], r[0]); m[1] = Math.min(m[1], r[1]); m[2] = Math.max(m[2], r[2]); m[3] = Math.max(m[3], r[3]); }
+    else out.push([...r]);
+  }
+  return out;
+}
+/* Highlights the text of a range (only the letters: the range's other boxes, like whole pages, are ignored). */
+function highlightRange(range, color = settings.color) {
+  const d = cur(); if (!d) return 0;
+  const byPage = new Map();
+  for (const span of pagesEl.querySelectorAll('.textLayer span:not(.markedContent)')) {
+    const tn = span.firstChild;
+    if (!tn || tn.nodeType !== 3 || !range.intersectsNode(tn)) continue;
+    const sub = document.createRange(); sub.selectNodeContents(tn);
+    if (range.startContainer === tn) sub.setStart(tn, range.startOffset);
+    if (range.endContainer === tn) sub.setEnd(tn, range.endOffset);
+    if (!sub.toString().trim()) continue;
+    const el = span.closest('.page'); if (!el || !el._vp) continue;
+    const b = el.getBoundingClientRect();
+    if (!byPage.has(el)) byPage.set(el, []);
+    for (const r of sub.getClientRects()) if (r.width >= 1 && r.height >= 1) byPage.get(el).push([r.left - b.left, r.top - b.top, r.right - b.left, r.bottom - b.top]);
+  }
+  const pages = [...byPage].filter(([, rects]) => rects.length);
+  if (!pages.length) return 0;
+  pushHistory(d);
+  for (const [el, rects] of pages) {
+    const rs = mergeLines(rects).map(([x0, y0, x1, y1]) => {
+      const [a, b] = el._vp.convertToPdfPoint(x0, y0), [c, e] = el._vp.convertToPdfPoint(x1, y1);
+      return [Math.min(a, c), Math.min(b, e), Math.max(a, c), Math.max(b, e)].map(v => +v.toFixed(2));
+    });
+    (d.annots[el._pg.id] = d.annots[el._pg.id] || []).push({t: 'hlt', rs, c: color});
+  }
+  changed();
+  return pages.length;
+}
+/* Highlight tool on text: dragging selects letters (like the select tool) and the selection becomes the highlight. */
+function highlightDrag(e) {
+  document.body.classList.add('hl-text');   // the text layer takes the mouse, so the browser finds the letters under it
+  const caret = (x, y) => {
+    const r = document.caretRangeFromPoint(x, y);
+    return r && r.startContainer.nodeType === 3 && r.startContainer.parentElement.closest('.textLayer') ? r : null;
+  };
+  const start = caret(e.clientX, e.clientY), sel = getSelection();
+  if (!start) { document.body.classList.remove('hl-text'); return; }
+  sel.removeAllRanges();
+  const move = ev => { const r = caret(ev.clientX, ev.clientY); if (r) sel.setBaseAndExtent(start.startContainer, start.startOffset, r.startContainer, r.startOffset); };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    document.body.classList.remove('hl-text');
+    const range = selectionRange();
+    if (range) highlightRange(range);
+    sel.removeAllRanges();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up, {once: true});
+}
+// In the highlight tool the cursor shows whether a drag will follow the text or draw a box.
+pagesEl.addEventListener('pointermove', e => {
+  if (tool !== 'highlight' || e.buttons) return;
+  const el = e.target.closest('.page'), svg = el && el.querySelector('svg.annots');
+  if (svg) svg.style.cursor = textAt(el, e.clientX, e.clientY) ? 'text' : '';
+});
 /* Text tool: a click writes new text; a click on a text edits it, dragging moves it. */
 function textDown(e, el, p) {
   if (textEd) return textEd.commit(true);   // a click beside the open editor just finishes it
@@ -671,8 +762,9 @@ let helvCtx = null;
 const helvWidth = (s, size) => { helvCtx = helvCtx || document.createElement('canvas').getContext('2d'); helvCtx.font = `${size}px Helvetica, Arial, sans-serif`; return helvCtx.measureText(s).width; };
 function annotsPdf(d, p) {
   const R = effRot(p), vp1 = proxyOf(d, p).getViewport({scale: 1, rotation: R});
-  return (d.annots[p.id] || []).map(a => {
+  return (d.annots[p.id] || []).flatMap(a => {
     if (a.t === 'hl') return {t: 'hl', r: a.r, c: a.c};
+    if (a.t === 'hlt') return a.rs.map(r => ({t: 'hl', r, c: a.c}));
     if (a.t === 'ink') return {t: 'ink', p: a.p, w: a.w, c: a.c};
     if (a.t === 'text') {   // lines laid out in display space like notes, so the text reads upright on rotated pages
       const [vx, vy] = vp1.convertToViewportPoint(a.x, a.y);
@@ -1025,7 +1117,15 @@ const A = {
   rotateLeft: () => rotatePages(-90), rotateRight: () => rotatePages(90), deletePages, extractPages: needsDoc(extractPages),
   firstPage: () => goToPage(0), prevPage: () => cur() && goToPage(cur().current - 1),
   nextPage: () => cur() && goToPage(cur().current + 1), lastPage: () => cur() && goToPage(cur().pages.length - 1),
-  toolSelect: () => setTool('select'), toolHand: () => setTool('hand'), toolHighlight: () => setTool('highlight'),
+  toolSelect: () => setTool('select'), toolHand: () => setTool('hand'), toolHighlight: () => {   // with text selected, M highlights it right away
+    const r = tool === 'select' && selectionRange();
+    if (r) { highlightRange(r); getSelection().removeAllRanges(); } else setTool('highlight');
+  },
+  highlightSelection: () => {
+    const r = selectionRange();
+    if (!r) return toast(t('toast.noSelection'));
+    highlightRange(r); getSelection().removeAllRanges();
+  },
   toolPen: () => setTool('pen'), toolNote: () => setTool('note'), toolText: () => setTool('text'),
   textBold: () => { settings.textBold = !settings.textBold; syncTextOpts(); saveState(); if (textEd) textEd.style(); }, toolErase: () => setTool('erase'),
   fitWidth: () => setZoom('fit-width'), fitPage: () => setZoom('fit-page'), actualSize: () => setZoom(1),
@@ -1064,7 +1164,7 @@ const MENUS = [
   ['tools', [['toolSelect', 'V', () => tool === 'select', true], ['toolHand', 'H', () => tool === 'hand', true], '-',
     ['toolHighlight', 'M', () => tool === 'highlight', true], ['toolPen', 'P', () => tool === 'pen', true],
     ['toolText', 'T', () => tool === 'text', true], ['toolNote', 'N', () => tool === 'note', true], ['toolErase', 'E', () => tool === 'erase', true], '-',
-    ['textBold', 'Ctrl+B', () => settings.textBold]]],
+    ['textBold', 'Ctrl+B', () => settings.textBold], ['highlightSelection', 'Ctrl+Shift+H']]],
   ['view', [['fitWidth', 'Ctrl+1', () => cur() && cur().zoomMode === 'fit-width'], ['fitPage', 'Ctrl+2', () => cur() && cur().zoomMode === 'fit-page'],
     ['actualSize', 'Ctrl+0'], ['zoomIn', 'Ctrl+='], ['zoomOut', 'Ctrl+-'], '-',
     ['togglePanels', 'Ctrl+\\', () => settings.dock], ['toggleAutoHide', null, () => settings.autoHide], ['toggleInvert', 'Ctrl+Shift+I', () => settings.invert]]],
@@ -1340,7 +1440,7 @@ if (window.Native) {
       d.current = i; markThumbs(); updatePageUI();
       const k = annotAt(pg, e.clientX, e.clientY), ann = k >= 0;
       ctx.ann = ann ? {pg: pg._pg, k} : null;
-      return [Native.copyTextItem(), ...(ann ? [null, {id: 'ctx:delAnn', label: t('ctx.deleteAnnot')}] : []), null,
+      return [Native.copyTextItem(), ...(selectionRange() ? [item('highlightSelection')] : []), ...(ann ? [null, {id: 'ctx:delAnn', label: t('ctx.deleteAnnot')}] : []), null,
         item('rotateLeft'), item('rotateRight'), item('deletePages'), item('exportPng'), null,
         ...['select', 'hand', 'highlight', 'pen', 'text', 'note'].map(n => item(TOOL_ACT[n], {checked: tool === n}))];
     }
@@ -1382,5 +1482,5 @@ if (window.Native) {
 })();
 
 // Exposed for automated UI tests in a browser.
-window.__pd = {openNoteEditor, openTextEditor, textDown, getTextEd: () => textEd, settings: () => settings, openFiles, A, cur, buildPdf, setZoom, goToPage, addAnnot, annotAt, movePages, deletePages, rotatePages, insertPdf, undoRedo,
+window.__pd = {highlightRange, selectionRange, openNoteEditor, openTextEditor, textDown, getTextEd: () => textEd, settings: () => settings, openFiles, A, cur, buildPdf, setZoom, goToPage, addAnnot, annotAt, movePages, deletePages, rotatePages, insertPdf, undoRedo,
   find, runFind, findStep, settings: () => settings, pdfjsLib, PDF_OPTS};

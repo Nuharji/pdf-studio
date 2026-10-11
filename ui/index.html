@@ -161,6 +161,9 @@ body.invert .page canvas{filter:invert(.9) hue-rotate(180deg)}
 body.invert .page{background:#1a1a1a}
 body.invert .page .annots .hl{mix-blend-mode:screen}
 body:not(.tool-select) .textLayer{pointer-events:none}
+body.hl-text .page .annots{pointer-events:none!important}
+body.hl-text .textLayer{pointer-events:auto!important}
+body.hl-text .textLayer ::selection{background:rgba(255,212,0,.45)}
 body.tool-hand .viewer{cursor:grab}
 body.tool-hand.panning .viewer{cursor:grabbing;user-select:none}
 body.tool-highlight .page .annots,body.tool-pen .page .annots,body.tool-note .page .annots,body.tool-erase .page .annots{pointer-events:auto;cursor:crosshair}

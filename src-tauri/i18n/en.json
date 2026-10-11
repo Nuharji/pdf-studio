@@ -197,5 +197,7 @@
   "a.textBold": "Bold Text",
   "ui.textPh": "Type text…",
   "ui.font": "Font",
-  "ui.fontSize": "Font size"
+  "ui.fontSize": "Font size",
+  "a.highlightSelection": "Highlight Selected Text",
+  "toast.noSelection": "Select text on a page first."
 }
