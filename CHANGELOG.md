@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.3 — 2026-10-11
+- Fixed: PDFs protected only by an owner password (they open without asking) are now shown as protected in the Properties panel.
+- Password-protected PDFs: properties and bookmarks are read with the password you entered.
+
 ## 1.2.2 — 2026-10-11
 - Document properties (version, encryption, title, author, subject, creator, producer, dates) and bookmarks are now read by the Rust core. Bookmarks keep working for links by name, nested bookmarks and web links.
 

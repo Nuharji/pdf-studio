@@ -116,8 +116,9 @@ fn outline_items(doc: &Document, first: Option<&Object>, pages: &HashMap<ObjectI
 
 pub fn info(bytes: &[u8], password: &str) -> Result<Info, String> {
     let mut doc = Document::load_mem(bytes).map_err(|e| e.to_string())?;
-    let encrypted = doc.is_encrypted();
-    if encrypted { doc.decrypt(password).map_err(|_| "encrypted".to_string())?; }
+    // lopdf already opens files without an open password (only an owner password); it then keeps the encryption state.
+    let encrypted = doc.is_encrypted() || doc.encryption_state.is_some();
+    if doc.is_encrypted() { doc.decrypt(password).map_err(|_| "encrypted".to_string())?; }
     let pages: HashMap<ObjectId, usize> = doc.get_pages().values().enumerate().map(|(i, id)| (*id, i)).collect();
     let mut out = Info { version: doc.version.clone(), encrypted, ..Default::default() };
     if let Some(d) = doc.trailer.get(b"Info").ok().and_then(|o| dict(&doc, o)) {
@@ -191,8 +192,38 @@ mod tests {
         assert_eq!((i.outline[1].items[0].title.as_str(), i.outline[1].items[0].page), ("Child", Some(0)));
     }
 
+    /// The sample, encrypted (RC4 128) with an open password ("" = only an owner password).
+    fn encrypted(user: &str) -> Vec<u8> {
+        let mut doc = Document::load_mem(&sample()).unwrap();
+        doc.trailer.set("ID", vec![Object::string_literal("0123456789abcdef"), Object::string_literal("0123456789abcdef")]);
+        let state = lopdf::EncryptionState::try_from(lopdf::EncryptionVersion::V2 {
+            document: &doc, owner_password: "owner", user_password: user, key_length: 128, permissions: lopdf::Permissions::all(),
+        }).unwrap();
+        doc.encrypt(&state).unwrap();
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        out
+    }
+
+    #[test]
+    fn password_protected() {
+        let locked = encrypted("geheim");
+        assert!(info(&locked, "").is_err());
+        let i = info(&locked, "geheim").unwrap();
+        assert!(i.encrypted);
+        assert_eq!((i.title.as_str(), i.outline.len(), i.outline[0].title.as_str()), ("Bericht – 2024", 3, "Einführung"));
+        // Only an owner password: opens without asking, still reported as encrypted.
+        let i = info(&encrypted(""), "").unwrap();
+        assert_eq!((i.encrypted, i.author.as_str()), (true, "Jamie"));
+    }
+
     /// Writes the sample to PD_SAMPLE (for trying it in the app).
     #[test]
     #[ignore]
-    fn write_sample() { std::fs::write(std::env::var("PD_SAMPLE").unwrap(), sample()).unwrap(); }
+    fn write_sample() {
+        let p = std::env::var("PD_SAMPLE").unwrap();
+        std::fs::write(&p, sample()).unwrap();
+        std::fs::write(p.replace(".pdf", "-locked.pdf"), encrypted("geheim")).unwrap();
+        std::fs::write(p.replace(".pdf", "-owner.pdf"), encrypted("")).unwrap();
+    }
 }
