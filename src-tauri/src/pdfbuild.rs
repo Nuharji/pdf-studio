@@ -16,6 +16,11 @@ use tauri::{
 #[derive(Default)]
 pub struct Sources(Mutex<HashMap<u64, Vec<u8>>>);
 
+impl Sources {
+    /// A copy of a cached source file.
+    pub fn get(&self, id: u64) -> Option<Vec<u8>> { self.0.lock().unwrap().get(&id).cloned() }
+}
+
 #[tauri::command]
 pub fn pdf_cache(sources: State<Sources>, request: Request) -> Result<u64, String> {
     let InvokeBody::Raw(bytes) = request.body() else { return Err("expected a binary body".into()) };

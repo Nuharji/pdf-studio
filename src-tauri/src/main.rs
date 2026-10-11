@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod pdfbuild;
+mod pdfinfo;
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -240,6 +241,7 @@ fn main() {
             pdfbuild::pdf_cache,
             pdfbuild::pdf_forget,
             pdfbuild::pdf_build,
+            pdfinfo::pdf_info,
             context_menu,
             clipboard_read,
             clipboard_write,

@@ -97,7 +97,9 @@ async function loadPdf(bytes, name) {
   for (let i = 1; i <= pdf.numPages; i++) proxies.push(await pdf.getPage(i));
   // Rust keeps a copy for building the saved file (pdfbuild.rs); the UI then only sends page lists.
   const rid = invoke ? await invoke('pdf_cache', bytes) : null;
-  return {bytes, pdf, proxies, encrypted: password != null, rid};
+  // Properties and bookmarks are read in Rust too (pdfinfo.rs); the password is only passed on, not kept.
+  const info = rid ? await invoke('pdf_info', {id: rid, password}).catch(() => null) : null;
+  return {bytes, pdf, proxies, encrypted: password != null, rid, info};
 }
 function pagesOf(src, srcIndex) {
   return src.proxies.map((p, index) => {
@@ -117,8 +119,7 @@ async function openFileInfo(f) {
   catch (e) { if (!/destroy|abort/i.test(String(e && (e.name + e.message)))) toast(t('toast.openFail', {name: f.name, e: e.message || e})); return; }
   const d = {id: ++docSeq, name: f.name, path: f.path, size: f.size || bytes.length, sources: [src], pages: pagesOf(src, 0),
     annots: {}, dirty: false, history: [], future: [], cleanDepth: 0, selected: new Set(), current: 0, zoom: 1,
-    zoomMode: settings.zoomMode, scroll: 0, meta: await src.pdf.getMetadata().catch(() => null),
-    outline: await src.pdf.getOutline().catch(() => null)};
+    zoomMode: settings.zoomMode, scroll: 0};
   docs.push(d);
   if (f.path) { recent = [{path: f.path, name: f.name}, ...recent.filter(r => r.path !== f.path)].slice(0, 10); }
   activate(docs.length - 1, true);
@@ -598,7 +599,7 @@ async function reloadFrom(d, bytes) {
   forgetSources(d.sources);
   const current = d.current;
   Object.assign(d, {sources: [src], pages: pagesOf(src, 0), annots: {}, history: [], future: [], cleanDepth: 0, dirty: false,
-    size: bytes.length, selected: new Set(), meta: await src.pdf.getMetadata().catch(() => null), outline: await src.pdf.getOutline().catch(() => null)});
+    size: bytes.length, selected: new Set()});
   textCache.clear();
   if (d === cur()) {
     const keep = viewer.scrollTop;
@@ -739,9 +740,10 @@ thumbsEl.addEventListener('drop', e => {
 thumbsEl.addEventListener('dragend', () => { dragIds = null; clearDrop(); $$('.thumb.dragging').forEach(x => x.classList.remove('dragging')); });
 
 /* ================= Outline & properties ================= */
+/* Bookmarks of the base document (from Rust: title, 0-based page or web link, children). */
 function buildOutline() {
-  const d = cur(), box = $('#outline');
-  if (!d || !d.outline || !d.outline.length) { box.innerHTML = `<div class="empty">${esc(t('ui.noOutline'))}</div>`; return; }
+  const d = cur(), box = $('#outline'), outline = d && d.sources[0].info && d.sources[0].info.outline;
+  if (!outline || !outline.length) { box.innerHTML = `<div class="empty">${esc(t('ui.noOutline'))}</div>`; return; }
   box.innerHTML = '';
   const add = (items, depth) => items.forEach(item => {
     const el = document.createElement('div');
@@ -751,38 +753,32 @@ function buildOutline() {
     box.append(el);
     if (item.items && item.items.length) add(item.items, depth + 1);
   });
-  add(d.outline, 0);
+  add(outline, 0);
 }
-async function outlineGo(item) {
-  const d = cur(), pdf = d.sources[0].pdf;
+function outlineGo(item) {
+  const d = cur();
   if (item.url) return openUrl(item.url);
-  let dest = item.dest;
-  if (typeof dest === 'string') dest = await pdf.getDestination(dest);
-  if (!Array.isArray(dest)) return;
-  const idx = typeof dest[0] === 'number' ? dest[0] : await pdf.getPageIndex(dest[0]).catch(() => -1);
-  const pos = d.pages.findIndex(p => p.src === 0 && p.index === idx);
+  // The page may have been moved or deleted since opening.
+  const pos = d.pages.findIndex(p => p.src === 0 && p.index === item.page);
   if (pos >= 0) goToPage(pos);
 }
-function pdfDate(s) {
-  const m = /^D?:?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?/.exec(s || '');
-  if (!m) return s || '';
-  const dt = new Date(+m[1], (+m[2] || 1) - 1, +m[3] || 1, +m[4] || 0, +m[5] || 0);
-  return dt.toLocaleString(lang, {dateStyle: 'medium', timeStyle: 'short'});
-}
+/* Dates come from Rust as [year, month, day, hour, minute], or as the text when it isn't a PDF date. */
+const pdfDate = v => !v ? '' : typeof v === 'string' ? v
+  : new Date(v[0], v[1] - 1, v[2], v[3], v[4]).toLocaleString(lang, {dateStyle: 'medium', timeStyle: 'short'});
 function buildProps() {
   const d = cur(), box = $('#props');
   if (!d) { box.innerHTML = ''; return; }
-  const info = (d.meta && d.meta.info) || {}, pg = d.pages[d.current] || d.pages[0];
+  const info = d.sources[0].info || {}, pg = d.pages[d.current] || d.pages[0];
   const sw = effRot(pg) % 180 !== 0, mm = v => Math.round(v * 25.4 / 72);
   const row = (k, v) => v ? `<div class="kv"><span>${esc(t(k))}</span><b title="${esc(v)}">${esc(v)}</b></div>` : '';
   box.innerHTML = `<div class="psec"><div class="psec-h">${esc(t('ui.file'))}</div>
     ${row('ui.title', d.name)}${row('ui.path', d.path || '')}${row('ui.fileSize', fmtSize(d.size))}
     ${row('ui.pageCount', String(d.pages.length))}${row('ui.pageSize', `${mm(sw ? pg.h : pg.w)} × ${mm(sw ? pg.w : pg.h)} mm`)}
-    ${row('ui.version', info.PDFFormatVersion || '')}${row('ui.encrypted', t(d.sources[0].encrypted ? 'ui.yes' : 'ui.no'))}</div>
+    ${row('ui.version', info.version || '')}${row('ui.encrypted', t(info.encrypted || d.sources[0].encrypted ? 'ui.yes' : 'ui.no'))}</div>
     <div class="psec" style="border:0"><div class="psec-h">${esc(t('ui.document'))}</div>
-    ${row('ui.title', info.Title || '')}${row('ui.author', info.Author || '')}${row('ui.subject', info.Subject || '')}
-    ${row('ui.creator', info.Creator || '')}${row('ui.producer', info.Producer || '')}
-    ${row('ui.created', pdfDate(info.CreationDate))}${row('ui.modified', pdfDate(info.ModDate))}</div>`;
+    ${row('ui.title', info.title || '')}${row('ui.author', info.author || '')}${row('ui.subject', info.subject || '')}
+    ${row('ui.creator', info.creator || '')}${row('ui.producer', info.producer || '')}
+    ${row('ui.created', pdfDate(info.created))}${row('ui.modified', pdfDate(info.modified))}</div>`;
 }
 
 /* ================= Search ================= */

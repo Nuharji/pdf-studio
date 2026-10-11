@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.2.2 — 2026-10-11
+- Document properties (version, encryption, title, author, subject, creator, producer, dates) and bookmarks are now read by the Rust core. Bookmarks keep working for links by name, nested bookmarks and web links.
+
 ## 1.2.1 — 2026-10-11
 - The English and German texts are now language files (src-tauri/i18n) delivered by the app's Rust core instead of being part of the JavaScript.
 
