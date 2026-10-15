@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.10.1 — 2026-10-15
+- App icon with a picture of what the app does, like Slides and Plan Studio; the window and taskbar icon is now the same picture.
+
 ## 1.10.0 — 2026-10-15
 - New: Fill in PDF forms. Text fields, check boxes, radio buttons and lists of the opened PDF become real inputs on the page (with the select or hand tool); a note tells you when a PDF has a form. Saving writes the values into the form fields (Rust: pdfbuild.rs fill_form) — with a fresh appearance for text fields, so every PDF reader shows them. Undo works for form entries too.
 - New: Signature tool (S, Tools → Signature). Draw your signature once (Tools → Draw Signature…, kept on this PC only), then click on a page to place it; it is saved into the PDF like pen strokes and the eraser removes it as one.
