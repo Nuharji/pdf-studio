@@ -256,7 +256,8 @@ async function renderPage(el) {
   dpr = Math.min(dpr, Math.sqrt(16e6 / (vp.width * vp.height)));   // cap canvas memory on huge zoom
   const canvas = document.createElement('canvas');
   canvas.width = Math.floor(vp.width * dpr); canvas.height = Math.floor(vp.height * dpr);
-  const task = proxyOf(d, pg).render({canvasContext: canvas.getContext('2d'), viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null});
+  const task = proxyOf(d, pg).render({canvasContext: canvas.getContext('2d'), viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+    annotationMode: pg.src === 0 ? pdfjsLib.AnnotationMode.ENABLE_FORMS : pdfjsLib.AnnotationMode.ENABLE});
   el._task = task;
   try { await task.promise; } catch (e) { return; }
   if (el.dataset.z !== key || !el.isConnected) return;
@@ -272,7 +273,66 @@ async function renderPage(el) {
     await new pdfjsLib.TextLayer({textContentSource: proxyOf(d, pg).streamTextContent(), container: tl, viewport: vp}).render();
     markHits(el);
   } catch (e) {}
+  renderForm(el, key);
 }
+
+/* ================= Forms ================= */
+/* Form fields of the opened PDF (its first file) are shown as real inputs over the page. Values are kept in d.form
+   (full field name → text, true/false or a choice; part of undo) and written into the fields when saving (Rust:
+   pdfbuild.rs fill_form). Fields of PDFs inserted later are not editable. */
+async function renderForm(el, key) {
+  const d = cur(), pg = el._pg, seq = el._formSeq = (el._formSeq || 0) + 1;
+  if (pg.src !== 0) { el.querySelectorAll('.formLayer').forEach(x => x.remove()); return; }
+  let list;
+  try { list = await proxyOf(d, pg).getAnnotations({intent: 'display'}); } catch (e) { return; }
+  // Only the newest call for this page draws (undo and a new rendering may overlap).
+  if (seq !== el._formSeq || el.dataset.z !== key || !el.isConnected) return;
+  el.querySelectorAll('.formLayer').forEach(x => x.remove());
+  const widgets = list.filter(a => a.subtype === 'Widget' && a.fieldName && !a.pushButton && !a.hidden && !a.noView);
+  if (!widgets.length) return;
+  if (!d.formSeen) { d.formSeen = true; toast(t('form.found')); }
+  d.form = d.form || {};
+  const vp = viewportOf(d, pg, d.zoom), layer = document.createElement('div');
+  layer.className = 'formLayer';
+  for (const a of widgets) {
+    const [x1, y1, x2, y2] = vp.convertToViewportRectangle(a.rect);
+    const box = {left: Math.min(x1, x2), top: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1)};
+    const name = a.fieldName, has = Object.prototype.hasOwnProperty.call(d.form, name);
+    let input;
+    if (a.fieldType === 'Tx') {
+      input = document.createElement(a.multiLine ? 'textarea' : 'input');
+      input.value = has ? d.form[name] : (a.fieldValue || '');
+      if (a.maxLen) input.maxLength = a.maxLen;
+      if (a.readOnly) input.readOnly = true;
+      input.style.fontSize = Math.max(8, Math.min(a.multiLine ? 12 * vp.scale : box.height * 0.65, 16 * vp.scale)) + 'px';
+      if (a.comb && a.maxLen) input.style.letterSpacing = `${box.width / a.maxLen - box.height * 0.4}px`;
+    } else if (a.fieldType === 'Btn' && (a.checkBox || a.radioButton)) {
+      input = document.createElement('input');
+      input.type = a.checkBox ? 'checkbox' : 'radio';
+      input.name = 'f:' + name;
+      const v = has ? d.form[name] : a.fieldValue;
+      input.checked = a.checkBox ? (v === true || (typeof v === 'string' && v !== 'Off' && v !== '')) : v === a.buttonValue;
+      input.dataset.on = a.checkBox ? (a.exportValue || 'Yes') : a.buttonValue;
+    } else if (a.fieldType === 'Ch') {
+      input = document.createElement('select');
+      if (!a.combo) input.size = Math.max(2, Math.min(6, a.options.length));
+      const v = has ? d.form[name] : (Array.isArray(a.fieldValue) ? a.fieldValue[0] : a.fieldValue);
+      input.innerHTML = a.options.map(o => `<option value="${esc(o.exportValue)}"${o.exportValue === v ? ' selected' : ''}>${esc(o.displayValue)}</option>`).join('');
+    } else continue;
+    input.className = 'ff';
+    input.title = a.alternativeText || name;
+    Object.assign(input.style, {left: box.left + 'px', top: box.top + 'px', width: box.width + 'px', height: box.height + 'px'});
+    input.addEventListener('change', () => {
+      const value = input.type === 'checkbox' ? input.checked : input.type === 'radio' ? (input.checked ? input.dataset.on : 'Off') : input.value;
+      pushHistory(d); d.form[name] = value; changed();
+      // The other buttons of a radio group follow.
+      if (input.type === 'radio') pagesEl.querySelectorAll(`.formLayer input[name="${CSS.escape(input.name)}"]`).forEach(r => { r.checked = r.dataset.on === value; });
+    });
+    layer.append(input);
+  }
+  el.append(layer);
+}
+function refreshForms() { const d = cur(); if (!d) return; for (const el of pagesEl.children) if (el.dataset.z) renderForm(el, el.dataset.z); }
 function freePage(el) {
   if (el._task) { el._task.cancel(); el._task = null; }
   el.querySelectorAll('canvas,.textLayer').forEach(x => x.remove());
@@ -375,6 +435,10 @@ function drawAnnots(el) {
       const pts = a.p.map(p => vp.convertToViewportPoint(p[0], p[1]).map(v => v.toFixed(1)).join(',')).join(' ');
       return `<polyline class="ann" data-k="${k}" points="${pts}" fill="none" stroke="${a.c}" stroke-width="${a.w * vp.scale}" stroke-linecap="round" stroke-linejoin="round"/>`;
     }
+    if (a.t === 'sig') {
+      return `<g class="ann sig" data-k="${k}" fill="none" stroke="${a.c}" stroke-width="${a.w * vp.scale}" stroke-linecap="round" stroke-linejoin="round">` +
+        a.s.map(st => `<polyline points="${st.map(p => vp.convertToViewportPoint(p[0], p[1]).map(v => v.toFixed(1)).join(',')).join(' ')}"/>`).join('') + '</g>';
+    }
     if (a.t === 'note') {
       const [x, y] = vp.convertToViewportPoint(a.x, a.y), s = vp.scale, box = noteBox(a.text, s);
       const tsp = box.lines.map((l, i) => `<tspan x="${x + NOTE.pad * s}" y="${y + (NOTE.pad + (i + 1) * NOTE.line - 3.5) * s}">${esc(l) || ' '}</tspan>`).join('');
@@ -405,8 +469,8 @@ function annotAt(el, clientX, clientY) {
         const [x1, y1] = vp.convertToViewportPoint(r[0], r[1]), [x2, y2] = vp.convertToViewportPoint(r[2], r[3]);
         return x >= Math.min(x1, x2) && x <= Math.max(x1, x2) && y >= Math.min(y1, y2) && y <= Math.max(y1, y2);
       })) return k;
-    } else if (a.t === 'ink') {
-      for (const p of a.p) { const [px, py] = vp.convertToViewportPoint(p[0], p[1]); if (Math.hypot(px - x, py - y) < 8) return k; }
+    } else if (a.t === 'ink' || a.t === 'sig') {
+      for (const p of (a.t === 'sig' ? a.s.flat() : a.p)) { const [px, py] = vp.convertToViewportPoint(p[0], p[1]); if (Math.hypot(px - x, py - y) < 8) return k; }
     } else if (a.t === 'note') {
       const [nx, ny] = vp.convertToViewportPoint(a.x, a.y), b = noteBox(a.text, vp.scale);
       if (x >= nx && x <= nx + b.w && y >= ny && y <= ny + b.h) return k;
@@ -439,6 +503,7 @@ pagesEl.addEventListener('pointerdown', e => {
   if (tool === 'highlight' && textAt(el, e.clientX, e.clientY)) return highlightDrag(e);
   if (tool === 'note') return openNoteEditor(el, local(e));
   if (tool === 'text') return textDown(e, el, local(e));
+  if (tool === 'sign') return placeSignature(el, local(e));
   svg.setPointerCapture(e.pointerId);
   const start = local(e), pts = [start];
   const temp = document.createElementNS(SVGNS, tool === 'highlight' ? 'rect' : 'polyline');
@@ -478,7 +543,10 @@ pagesEl.addEventListener('pointerdown', e => {
 /* An open note or text editor is finished (kept) before saving, printing, closing or switching documents:
    the toolbar buttons and shortcuts don't take the focus away from it, so its blur doesn't do it. */
 let noteEd = null;
-function finishEditors() { if (textEd) textEd.commit(true); if (noteEd) noteEd.commit(true); }
+function finishEditors() {
+  if (textEd) textEd.commit(true); if (noteEd) noteEd.commit(true);
+  const f = document.activeElement; if (f && f.closest && f.closest('.formLayer')) f.blur();   // its change event stores the value
+}
 const spellIgnored = new Set();   // spelling issues ignored in notes this session
 function openNoteEditor(el, [x, y]) {
   const ta = document.createElement('textarea');
@@ -683,10 +751,50 @@ function setTool(name) {
   syncTextOpts();
   $('#stTool').textContent = t('tool.status', {name: t('a.' + TOOL_ACT[name])});
 }
-const TOOL_ACT = {select: 'toolSelect', hand: 'toolHand', highlight: 'toolHighlight', pen: 'toolPen', note: 'toolNote', text: 'toolText', erase: 'toolErase'};
+const TOOL_ACT = {select: 'toolSelect', hand: 'toolHand', highlight: 'toolHighlight', pen: 'toolPen', note: 'toolNote', text: 'toolText', sign: 'toolSign', erase: 'toolErase'};
+
+/* ================= Signature ================= */
+/* The signature is drawn once in a pad (kept in the settings, on this PC only) and placed with a click; on the page it
+   is a group of ink strokes (saved like the pen), 160 pt wide, which the eraser removes as one. */
+const SIG_W = 160, SIG_COLOR = '#1a3d8f';
+function signaturePad(then) {
+  const strokes = [];
+  modal(t('sig.title'), `<p class="hint" style="margin-top:0">${esc(t('sig.hint'))}</p><canvas class="sig-pad" width="900" height="300"></canvas>`, [
+    {label: t('sig.clear'), onClick: () => { strokes.length = 0; draw(); }},
+    {label: t('confirm.cancel'), onClick: closeModal},
+    {label: t('sig.save'), primary: true, onClick: () => {
+      if (!strokes.length) return toast(t('sig.empty'));
+      // Trimmed to the drawing and stored relative to its width.
+      const all = strokes.flat(), x0 = Math.min(...all.map(p => p[0])), y0 = Math.min(...all.map(p => p[1]));
+      const w = Math.max(1, Math.max(...all.map(p => p[0])) - x0), h = Math.max(1, Math.max(...all.map(p => p[1])) - y0);
+      settings.signature = {ratio: h / w, s: strokes.map(st => st.map(([x, y]) => [+((x - x0) / w).toFixed(4), +((y - y0) / w).toFixed(4)]))};
+      saveState(); closeModal(); toast(t('sig.saved')); if (then) then();
+    }}]);
+  const cv = $('.sig-pad'), g = cv.getContext('2d');
+  const draw = () => {
+    g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+    g.strokeStyle = '#d0d4dc'; g.lineWidth = 1; g.beginPath(); g.moveTo(40, 230); g.lineTo(860, 230); g.stroke();
+    g.strokeStyle = SIG_COLOR; g.lineWidth = 4; g.lineCap = g.lineJoin = 'round';
+    for (const st of strokes) { g.beginPath(); st.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); if (st.length === 1) g.lineTo(st[0][0] + .1, st[0][1]); g.stroke(); }
+  };
+  let cur = null;
+  const at = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * cv.width, (e.clientY - r.top) / r.height * cv.height]; };
+  cv.onpointerdown = e => { cv.setPointerCapture(e.pointerId); cur = [at(e)]; strokes.push(cur); draw(); };
+  cv.onpointermove = e => { if (!cur) return; const p = at(e), l = cur[cur.length - 1]; if (Math.hypot(p[0] - l[0], p[1] - l[1]) > 2) { cur.push(p); draw(); } };
+  cv.onpointerup = cv.onpointercancel = () => { cur = null; };
+  draw();
+}
+function placeSignature(el, at) {
+  const sig = settings.signature;
+  if (!sig || !sig.s || !sig.s.length) return signaturePad(() => setTool('sign'));
+  const vp = el._vp, w = SIG_W * vp.scale, h = w * sig.ratio;
+  // The click is the left end of the signature's middle.
+  const ox = at[0], oy = at[1] - h / 2;
+  addAnnot(el._pg, {t: 'sig', w: 1.4, c: SIG_COLOR, s: sig.s.map(st => st.map(([x, y]) => vp.convertToPdfPoint(ox + x * w, oy + y * w).map(v => +v.toFixed(2))))});
+}
 
 /* ================= History & page operations ================= */
-const snapshot = d => ({pages: d.pages.map(p => ({...p})), annots: JSON.parse(JSON.stringify(d.annots))});
+const snapshot = d => ({pages: d.pages.map(p => ({...p})), annots: JSON.parse(JSON.stringify(d.annots)), form: {...(d.form || {})}});
 function pushHistory(d) {
   if (d.history.length < d.cleanDepth) d.cleanDepth = -1;
   d.history.push(snapshot(d));
@@ -713,8 +821,10 @@ function undoRedo(redo) {
   to.push(snapshot(d));
   const s = from.pop();
   const structure = s.pages.length !== d.pages.length || s.pages.some((p, i) => p.id !== d.pages[i].id || p.rot !== d.pages[i].rot);
-  d.pages = s.pages; d.annots = s.annots;
+  const formChanged = JSON.stringify(s.form || {}) !== JSON.stringify(d.form || {});
+  d.pages = s.pages; d.annots = s.annots; d.form = s.form || {};
   changed(structure);
+  if (formChanged) refreshForms();
 }
 const targetIds = d => d.selected.size ? new Set(d.selected) : new Set([d.pages[d.current].id]);
 function rotatePages(delta) {
@@ -821,6 +931,7 @@ function annotsPdf(d, p) {
     if (a.t === 'hl') return {t: 'hl', r: a.r, c: a.c};
     if (a.t === 'hlt') return a.rs.map(r => ({t: 'hl', r, c: a.c}));
     if (a.t === 'ink') return {t: 'ink', p: a.p, w: a.w, c: a.c};
+    if (a.t === 'sig') return a.s.map(p => ({t: 'ink', p, w: a.w, c: a.c}));
     if (a.t === 'text') {   // lines laid out in display space like notes, so the text reads upright on rotated pages
       const [vx, vy] = vp1.convertToViewportPoint(a.x, a.y);
       return {t: 'text', rot: R, c: a.c, size: a.size, font: a.font, bold: !!a.bold, lines: a.text.split('\n').map((text, k) => {
@@ -844,7 +955,8 @@ async function buildPdf(d, onlyIds = null) {
   if (d.sources.some(s => s.encrypted)) throw new Error('encrypted');
   const list = onlyIds ? d.pages.filter(p => onlyIds.has(p.id)) : d.pages;
   const pages = list.map(p => ({src: p.src, index: p.index, rot: effRot(p), annots: annotsPdf(d, p)}));
-  return new Uint8Array(await invoke('pdf_build', {req: {sources: d.sources.map(s => s.rid), pages}}));
+  const form = Object.entries(d.form || {}).map(([name, value]) => ({name, value}));
+  return new Uint8Array(await invoke('pdf_build', {req: {sources: d.sources.map(s => s.rid), pages, form}}));
 }
 async function guardedBuild(d, onlyIds) {
   try { return await buildPdf(d, onlyIds); }
@@ -1149,6 +1261,7 @@ const ICONS = {
   note: '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/></svg>',
   text: '<svg viewBox="0 0 24 24"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>',
   bold: '<svg viewBox="0 0 24 24"><path d="M7 4h7a4 4 0 0 1 0 8H7zM7 12h8a4 4 0 0 1 0 8H7z"/></svg>',
+  sign: '<svg viewBox="0 0 24 24"><path d="M3 17c2-3 3.5-7 5-7s.5 6 2 6 2.5-4 4-4 1 3 2.5 3S19 13 21 12"/><path d="M3 21h18"/></svg>',
   erase: '<svg viewBox="0 0 24 24"><path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L13 19"/><path d="M22 21H7M5 11l9 9"/></svg>',
   rotL: '<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
   rotR: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
@@ -1183,7 +1296,8 @@ const A = {
     if (!r) return toast(t('toast.noSelection'));
     highlightRange(r); getSelection().removeAllRanges();
   },
-  toolPen: () => setTool('pen'), toolNote: () => setTool('note'), toolText: () => setTool('text'),
+  toolPen: () => setTool('pen'), toolNote: () => setTool('note'), toolText: () => setTool('text'), toolSign: () => setTool('sign'),
+  signEdit: () => signaturePad(() => setTool('sign')),
   textBold: () => { settings.textBold = !settings.textBold; syncTextOpts(); saveState(); if (textEd) textEd.style(); }, toolErase: () => setTool('erase'),
   fitWidth: () => setZoom('fit-width'), fitPage: () => setZoom('fit-page'), actualSize: () => setZoom(1),
   zoomIn: () => zoomStep(1), zoomOut: () => zoomStep(-1),
@@ -1220,7 +1334,8 @@ const MENUS = [
     ['firstPage', 'Ctrl+Home'], ['prevPage', 'Ctrl+PageUp'], ['nextPage', 'Ctrl+PageDown'], ['lastPage', 'Ctrl+End']]],
   ['tools', [['toolSelect', 'V', () => tool === 'select', true], ['toolHand', 'H', () => tool === 'hand', true], '-',
     ['toolHighlight', 'M', () => tool === 'highlight', true], ['toolPen', 'P', () => tool === 'pen', true],
-    ['toolText', 'T', () => tool === 'text', true], ['toolNote', 'N', () => tool === 'note', true], ['toolErase', 'E', () => tool === 'erase', true], '-',
+    ['toolText', 'T', () => tool === 'text', true], ['toolNote', 'N', () => tool === 'note', true], ['toolSign', 'S', () => tool === 'sign', true], ['signEdit'],
+    ['toolErase', 'E', () => tool === 'erase', true], '-',
     ['textBold', 'Ctrl+B', () => settings.textBold], ['highlightSelection', 'Ctrl+Shift+H']]],
   ['view', [['fitWidth', 'Ctrl+1', () => cur() && cur().zoomMode === 'fit-width'], ['fitPage', 'Ctrl+2', () => cur() && cur().zoomMode === 'fit-page'],
     ['actualSize', 'Ctrl+0'], ['zoomIn', 'Ctrl+='], ['zoomOut', 'Ctrl+-'], '-',
@@ -1284,7 +1399,7 @@ function buildToolbars() {
   fill('#pageTools', [['rotateLeft', ICONS.rotL, {needsDoc: 1}], ['rotateRight', ICONS.rotR, {needsDoc: 1}], ['deletePages', ICONS.trash, {needsDoc: 1}],
     ['extractPages', ICONS.extract, {needsDoc: 1}], ['insertPdf', ICONS.insert, {needsDoc: 1}], ['insertBlank', ICONS.blank, {needsDoc: 1}]]);
   const tools = $('#tools'); tools.innerHTML = '';
-  [['toolSelect', 'select'], ['toolHand', 'hand'], '-', ['toolHighlight', 'highlight'], ['toolPen', 'pen'], ['toolText', 'text'], ['toolNote', 'note'], ['toolErase', 'erase'], '-']
+  [['toolSelect', 'select'], ['toolHand', 'hand'], '-', ['toolHighlight', 'highlight'], ['toolPen', 'pen'], ['toolText', 'text'], ['toolNote', 'note'], ['toolSign', 'sign'], ['toolErase', 'erase'], '-']
     .forEach(r => {
       if (r === '-') { const s = document.createElement('div'); s.className = 'sep'; return tools.append(s); }
       tools.append(makeBtn(r[0], ICONS[r[1]], {tool: r[1]}));
@@ -1499,7 +1614,7 @@ if (window.Native) {
       ctx.ann = ann ? {pg: pg._pg, k} : null;
       return [Native.copyTextItem(), ...(selectionRange() ? [item('highlightSelection')] : []), ...(ann ? [null, {id: 'ctx:delAnn', label: t('ctx.deleteAnnot')}] : []), null,
         item('rotateLeft'), item('rotateRight'), item('deletePages'), item('exportPng'), null,
-        ...['select', 'hand', 'highlight', 'pen', 'text', 'note'].map(n => item(TOOL_ACT[n], {checked: tool === n}))];
+        ...['select', 'hand', 'highlight', 'pen', 'text', 'note', 'sign'].map(n => item(TOOL_ACT[n], {checked: tool === n}))];
     }
     return null;
   });

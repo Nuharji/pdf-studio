@@ -213,5 +213,14 @@
   "blank.start": "At the beginning",
   "blank.end": "At the end",
   "blank.insert": "Insert",
-  "toast.blankAdded": "Blank pages inserted: {n}"
+  "toast.blankAdded": "Blank pages inserted: {n}",
+  "a.toolSign": "Signature",
+  "a.signEdit": "Draw Signature…",
+  "form.found": "This PDF has a form — click a field to fill it in (select tool). Saving writes the values into the PDF.",
+  "sig.title": "Your signature",
+  "sig.hint": "Sign with the mouse or a pen. It is kept on this PC only, and placed with a click on a page (Signature tool, S).",
+  "sig.clear": "Clear",
+  "sig.save": "Save signature",
+  "sig.empty": "Draw your signature first.",
+  "sig.saved": "Signature saved — click on a page to place it."
 }

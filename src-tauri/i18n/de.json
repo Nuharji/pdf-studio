@@ -213,5 +213,14 @@
   "blank.start": "Am Anfang",
   "blank.end": "Am Ende",
   "blank.insert": "Einfügen",
-  "toast.blankAdded": "Leere Seiten eingefügt: {n}"
+  "toast.blankAdded": "Leere Seiten eingefügt: {n}",
+  "a.toolSign": "Unterschrift",
+  "a.signEdit": "Unterschrift zeichnen…",
+  "form.found": "Dieses PDF enthält ein Formular — Feld anklicken zum Ausfüllen (Auswahlwerkzeug). Beim Speichern werden die Werte in das PDF geschrieben.",
+  "sig.title": "Deine Unterschrift",
+  "sig.hint": "Unterschreibe mit Maus oder Stift. Sie wird nur auf diesem PC gespeichert und mit einem Klick auf eine Seite gesetzt (Werkzeug Unterschrift, S).",
+  "sig.clear": "Leeren",
+  "sig.save": "Unterschrift speichern",
+  "sig.empty": "Zeichne zuerst deine Unterschrift.",
+  "sig.saved": "Unterschrift gespeichert — klicke auf eine Seite, um sie zu setzen."
 }

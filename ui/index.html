@@ -165,6 +165,15 @@ body.invert .page canvas{filter:invert(.9) hue-rotate(180deg)}
 body.invert .page{background:#1a1a1a}
 body.invert .page .annots .hl{mix-blend-mode:screen}
 body:not(.tool-select) .textLayer{pointer-events:none}
+/* Form fields of the PDF (app.js renderForm): usable with the select and hand tools */
+.formLayer{position:absolute;inset:0;z-index:3;pointer-events:none;color-scheme:light}
+.formLayer .ff{position:absolute;box-sizing:border-box;margin:0;padding:0 3px;background:rgba(214,228,255,.6);border:1px solid rgba(55,142,240,.6);border-radius:2px;
+  color:#000;font-family:Helvetica,Arial,sans-serif;line-height:1.15;resize:none;outline:0;pointer-events:none}
+body.tool-select .formLayer .ff,body.tool-hand .formLayer .ff{pointer-events:auto}
+.formLayer .ff:focus{background:#fff;border-color:#378ef0;box-shadow:0 0 0 2px rgba(55,142,240,.35)}
+.formLayer input[type=checkbox].ff,.formLayer input[type=radio].ff{padding:0;accent-color:#1a3d8f;cursor:pointer}
+.formLayer select.ff{padding:0 2px}
+.sig-pad{width:100%;height:auto;aspect-ratio:3/1;background:#fff;border:1px solid var(--border);border-radius:var(--radius);touch-action:none;cursor:crosshair;display:block}
 body.hl-text .page .annots{pointer-events:none!important}
 body.hl-text .textLayer{pointer-events:auto!important}
 body.hl-text .textLayer ::selection{background:rgba(255,212,0,.45)}
