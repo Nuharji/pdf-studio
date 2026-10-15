@@ -1552,6 +1552,7 @@ function applySettings() {
     if (typeof buildToolbars === 'function' && document.querySelector('#menus')) buildToolbars();
   }
   if (!THEMES.includes(settings.theme)) settings.theme = 'dark';
+  if (window.Shared) Shared.push({theme: settings.theme, lang: settings.lang});
   const nl = effectiveLang();
   if (nl !== lang) { lang = nl; applyLanguage(); }
   document.documentElement.dataset.theme = settings.theme;
@@ -1633,6 +1634,12 @@ if (window.Native) {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(STORE)); } catch (e) {}
   if (saved) { settings = {...DEF, ...saved.settings}; recent = saved.recent || []; }
+  // Theme and language shared by all Studio apps (shared.js); the shared values win over this app's own.
+  if (window.Shared) await Shared.init({apply: sh => {
+    if (sh.theme) settings.theme = sh.theme;
+    if (sh.lang) settings.lang = sh.lang;
+    if (booted) applySettings();
+  }});
   lang = effectiveLang();
   applyLanguage();
   booted = true;

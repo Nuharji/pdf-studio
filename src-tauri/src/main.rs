@@ -1,6 +1,7 @@
 // Hide the console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod shared;
 mod pdfbuild;
 mod pdfinfo;
 mod spell;
@@ -83,8 +84,7 @@ fn header(req: &Request, key: &str) -> Option<String> {
 
 #[tauri::command]
 async fn pick_pdfs(app: AppHandle) -> Vec<FileInfo> {
-    app.dialog()
-        .file()
+    crate::shared::file_dialog(&app)
         .add_filter("PDF", &["pdf"])
         .blocking_pick_files()
         .unwrap_or_default()
@@ -130,9 +130,7 @@ async fn save_binary(app: AppHandle, request: Request<'_>) -> Result<Option<Save
             let name = header(&request, "x-name").unwrap_or_else(|| "document.pdf".into());
             let filter = header(&request, "x-filter").unwrap_or_else(|| "PDF".into());
             let ext = header(&request, "x-ext").unwrap_or_else(|| "pdf".into());
-            match app
-                .dialog()
-                .file()
+            match crate::shared::file_dialog(&app)
                 .set_file_name(&name)
                 .add_filter(&filter, &[ext.as_str()])
                 .blocking_save_file()
@@ -254,6 +252,8 @@ fn main() {
         .manage(Mutex::new(Pending { ready: false, paths: args }))
         .manage(pdfbuild::Sources::default())
         .invoke_handler(tauri::generate_handler![
+            shared::shared_get,
+            shared::shared_set,
             texts,
             pdfbuild::pdf_cache,
             pdfbuild::pdf_forget,

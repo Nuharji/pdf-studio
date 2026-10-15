@@ -3,6 +3,7 @@
 ## 1.10.0 — 2026-10-15
 - New: Fill in PDF forms. Text fields, check boxes, radio buttons and lists of the opened PDF become real inputs on the page (with the select or hand tool); a note tells you when a PDF has a form. Saving writes the values into the form fields (Rust: pdfbuild.rs fill_form) — with a fresh appearance for text fields, so every PDF reader shows them. Undo works for form entries too.
 - New: Signature tool (S, Tools → Signature). Draw your signature once (Tools → Draw Signature…, kept on this PC only), then click on a page to place it; it is saved into the PDF like pen strokes and the eraser removes it as one.
+- Shared with all Studio apps (shared.rs / shared.js): theme and language follow the other apps and Studio Hub (also when you switch windows), and file dialogs open in the work folder chosen in Studio Hub.
 
 ## 1.9.1 — 2026-10-11
 - Fixed: a note or text that was still being typed was left out when you saved (Save button or Ctrl+S), printed or exported, and was lost without a question when the tab or window was closed. It is now finished and kept first, like pressing Enter.
