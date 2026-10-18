@@ -81,6 +81,10 @@ pub enum Annot {
     /// ("helv", "times" or "cour", optionally bold), rotated by `rot` degrees so it reads upright.
     #[serde(rename = "text")]
     Text { rot: f64, c: String, size: f64, font: String, #[serde(default)] bold: bool, lines: Vec<NoteLine> },
+    /// Text recognized on a scanned page (OCR): invisible words over the picture, so the PDF can be searched and
+    /// its text selected in any reader. Each word sits at its baseline, rotated by `rot` and stretched (`tz` %) to its width.
+    #[serde(rename = "ocr")]
+    Ocr { rot: f64, words: Vec<OcrWord> },
 }
 
 /// Standard fonts every PDF reader has, by the UI's names: (key, resource name, base font).
@@ -90,6 +94,9 @@ fn font_res(font: &str, bold: bool) -> &'static str {
     let key = format!("{font}{}", if bold { "B" } else { "" });
     FONTS.iter().find(|f| f.0 == key).map_or("CSF_helv", |f| f.1)
 }
+
+#[derive(Deserialize)]
+pub struct OcrWord { x: f64, y: f64, size: f64, tz: f64, text: String }
 
 #[derive(Deserialize)]
 pub struct NoteLine {
@@ -154,6 +161,16 @@ fn annot_ops(list: &[Annot]) -> String {
                     s += &format!("BT /CSHelv {} Tf 0.13 0.13 0.13 rg {} {} {} {} {} {} Tm {} Tj ET\n",
                         n(*size), n(cos), n(sin), n(-sin), n(cos), n(l.x), n(l.y), pdf_text(&l.text));
                 }
+            }
+            Annot::Ocr { rot, words } => {
+                // q … Q keeps render mode 3 (invisible) and the stretching away from later annotations.
+                let (sin, cos) = rot.to_radians().sin_cos();
+                s += "q BT 3 Tr\n";
+                for w in words.iter().filter(|w| !w.text.trim().is_empty() && w.size > 0.0) {
+                    s += &format!("/CSF_helv {} Tf {} Tz {} {} {} {} {} {} Tm {} Tj\n",
+                        n(w.size), n(w.tz.clamp(1.0, 1000.0)), n(cos), n(sin), n(-sin), n(cos), n(w.x), n(w.y), pdf_text(&w.text));
+                }
+                s += "ET Q\n";
             }
             Annot::Text { rot, c, size, font, bold, lines } => {
                 let (cr, cg, cb) = rgb(c);
@@ -533,6 +550,7 @@ mod tests {
                 Annot::Ink { p: vec![[0.0, 0.0], [50.0, 50.0], [80.0, 20.0]], w: 2.0, c: "#e5384f".into() },
                 Annot::Note { x: 200.0, y: 300.0, w: 120.0, h: 40.0, rot: 0.0, c: "#ffd400".into(), size: 11.0,
                     lines: vec![NoteLine { x: 206.0, y: 320.0, text: "Grüße (1) €".into() }] },
+                Annot::Ocr { rot: 0.0, words: vec![OcrWord { x: 72.0, y: 600.0, size: 11.0, tz: 92.5, text: "Übung".into() }] },
                 Annot::Text { rot: 0.0, c: "#1e5bd6".into(), size: 18.0, font: "times".into(), bold: true,
                     lines: vec![NoteLine { x: 50.0, y: 700.0, text: "Hallo".into() }, NoteLine { x: 50.0, y: 678.0, text: String::new() }] } ] },
             PageReq { src: 0, index: 0, rot: 0, annots: vec![] },
@@ -551,6 +569,8 @@ mod tests {
         let annotated = text_of(&doc, ids[1]);
         assert!(annotated.contains("/CSHl gs") && annotated.contains(" re f") && annotated.contains(" l S") && annotated.contains("/CSHelv"));
         assert!(annotated.contains("(Gr\\374\\337e \\(1\\) \\200)"), "{annotated}");
+        assert!(annotated.contains("q BT 3 Tr\n/CSF_helv 11 Tf 92.5 Tz 1 0 -0 1 72 600 Tm (\\334bung) Tj\nET Q\n"), "{annotated}");
+        assert!(annotated.find("ET Q\n").unwrap() < annotated.find("BT /CSF_timesB").unwrap(), "visible text after the OCR block");
         assert!(annotated.contains("BT /CSF_timesB 18 Tf 0.118 0.357 0.839 rg 1 0 -0 1 50 700 Tm (Hallo) Tj ET"), "{annotated}");
         let res = doc.get_dictionary(ids[1]).unwrap().get(b"Resources").unwrap().as_dict().unwrap();
         let fonts = res.get(b"Font").unwrap().as_dict().unwrap();

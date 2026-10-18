@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.11.0 — 2026-10-18
+- New: Recognize Text (OCR) — Tools menu, Ctrl+Shift+T, page panel or right-click. Scanned pages are pictures; text recognition reads them (German, English or both) so you can search, select, copy and highlight the text, and the saved PDF is searchable in every other reader too (the text is written in invisibly over the scan). Choose all pages without text, the current page, the selected pages or all pages; a progress card shows each page, Esc stops. Undo removes it; Tools → Remove Recognized Text takes it off a page. Runs on your computer with the bundled Tesseract engine — nothing is uploaded or downloaded. Opening a PDF without any text suggests it.
+- Fixed: text in PDFs couldn't be selected with the mouse on Windows, so Copy (Ctrl+C) copied nothing. Dragging over text selects it again.
+
 ## 1.10.1 — 2026-10-15
 - App icon with a picture of what the app does, like Slides and Plan Studio; the window and taskbar icon is now the same picture.
 

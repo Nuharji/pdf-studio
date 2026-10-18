@@ -1,2 +1,5 @@
 # Dictionaries stay byte-for-byte as published (no line-ending conversion).
 src-tauri/dictionaries/** -text
+
+# Bundled OCR engine and language data stay byte-for-byte.
+ui/vendor/tesseract/** -text

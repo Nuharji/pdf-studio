@@ -33,7 +33,7 @@ const fmtSize = b => b >= 1048576 ? (b / 1048576).toLocaleString(lang, {maximumF
 /* ================= Settings & state ================= */
 const THEMES = ['dark', 'light', 'github', 'github-dark'];
 const COLORS = ['#FFD400', '#7CE38B', '#62B3FF', '#FF7AB6', '#E5384F', '#1F2328'];
-const DEF = {keys: {}, autoHide: false, lang: 'auto', theme: 'dark', zoomMode: 'fit-width', invert: false, dock: true, dockTab: 'pages', reopen: true, color: '#FFD400', spell: 'auto',
+const DEF = {keys: {}, autoHide: false, lang: 'auto', theme: 'dark', zoomMode: 'fit-width', invert: false, dock: true, dockTab: 'pages', reopen: true, color: '#FFD400', spell: 'auto', ocr: {pages: 'notext', lang: 'deu+eng'},
   textColor: '#1F2328', textFont: 'helv', textSize: 14, textBold: false};
 let settings = {...DEF}, recent = [], docs = [], active = -1, tool = 'select', booted = false, docSeq = 0, pageSeq = 0;
 const cur = () => docs[active];
@@ -131,6 +131,7 @@ async function openFileInfo(f) {
   docs.push(d);
   if (f.path) { recent = [{path: f.path, name: f.name}, ...recent.filter(r => r.path !== f.path)].slice(0, 10); }
   activate(docs.length - 1, true);
+  setTimeout(() => ocrHint(d).catch(() => {}), 1200);
 }
 async function openFiles(list) { for (const f of list) await openFileInfo(f); }
 
@@ -271,6 +272,7 @@ async function renderPage(el) {
   canvas.after(tl);
   try {
     await new pdfjsLib.TextLayer({textContentSource: proxyOf(d, pg).streamTextContent(), container: tl, viewport: vp}).render();
+    drawOcr(el);
     markHits(el);
   } catch (e) {}
   renderForm(el, key);
@@ -453,6 +455,7 @@ function drawAnnots(el) {
     }
     return '';
   }).join('');
+  drawOcr(el);
 }
 /* Which annotation (index) lies under a screen point on a page, or -1. Works in every tool,
    unlike event targets (the annotation layer ignores the mouse while selecting text). */
@@ -918,6 +921,159 @@ function blankDialog() {
   $('#bCount').focus(); $('#bCount').select();
 }
 
+/* ================= Text recognition (OCR) ================= */
+/* Scanned pages are pictures without text. Tesseract (WebAssembly, bundled in ui/vendor/tesseract with German and English
+   data — nothing is downloaded, it runs on this computer) reads them. The words become one "ocr" annotation per page:
+   invisible text over the picture that can be selected, copied, searched and highlighted here, and that Rust writes into
+   the saved PDF (pdfbuild.rs), so other readers can search it too. Undo removes it like any annotation. */
+let ocrWorker = null, ocrLangs = '', ocrProgress = null, ocrRun = null;
+// The SIMD build is faster; the plain build is for WebViews without WebAssembly SIMD.
+const WASM_SIMD = (() => { try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])); } catch (e) { return false; } })();
+async function ocrEngine(langs) {
+  if (!window.Tesseract) await new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = 'vendor/tesseract/tesseract.min.js'; s.onload = res; s.onerror = () => rej(new Error('OCR engine missing')); document.head.append(s);
+  });
+  if (ocrWorker && ocrLangs === langs) return ocrWorker;
+  if (ocrWorker) { await ocrWorker.terminate(); ocrWorker = null; }
+  const base = new URL('vendor/tesseract/', location.href).href;
+  ocrWorker = await Tesseract.createWorker(langs.split('+'), 1, {
+    workerPath: base + 'worker.min.js', langPath: base + 'lang', gzip: true, cacheMethod: 'none', workerBlobURL: false,
+    corePath: base + 'core/' + (WASM_SIMD ? 'tesseract-core-simd-lstm.wasm.js' : 'tesseract-core-lstm.wasm.js'),
+    logger: m => { if (ocrProgress && m.status === 'recognizing text') ocrProgress(m.progress); }
+  });
+  ocrLangs = langs;
+  return ocrWorker;
+}
+const hasOcr = (d, pg) => (d.annots[pg.id] || []).some(a => a.t === 'ocr');
+/* Reads one page as it is shown (its rotation) at about 300 dpi; returns the "ocr" annotation or null. */
+async function recognizePage(d, pg, langs) {
+  const worker = await ocrEngine(langs), proxy = proxyOf(d, pg), R = effRot(pg);
+  const scale = Math.min(300 / 72, 4200 / Math.max(pg.w, pg.h));
+  const vp = proxy.getViewport({scale, rotation: R}), vp1 = proxy.getViewport({scale: 1, rotation: R});
+  const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+  const ctx2 = c.getContext('2d'); ctx2.fillStyle = '#fff'; ctx2.fillRect(0, 0, c.width, c.height);
+  await proxy.render({canvasContext: ctx2, viewport: vp}).promise;
+  const r = await worker.recognize(c, {}, {blocks: true});
+  c.width = c.height = 0;
+  const words = [];
+  for (const b of r.data.blocks || []) for (const para of b.paragraphs) for (const line of para.lines) {
+    // A word is placed on its line (same top and height for the whole line), so selections look tidy.
+    // Only unsure marks without letters or digits are dropped (specks on the scan); real words stay even when unsure.
+    const ws = line.words.filter(w => w.text.trim() && (w.confidence >= 15 || /[\p{L}\p{N}]/u.test(w.text)));
+    ws.forEach((w, i) => {
+      const x0 = w.bbox.x0 / scale, x1 = w.bbox.x1 / scale, y0 = line.bbox.y0 / scale, y1 = line.bbox.y1 / scale;
+      const [x, y] = vp1.convertToPdfPoint(x0, y0);
+      words.push({s: w.text, x: +x.toFixed(2), y: +y.toFixed(2), w: +(x1 - x0).toFixed(2), h: +(y1 - y0).toFixed(2), ...(i === ws.length - 1 ? {n: 1} : {})});
+    });
+  }
+  return words.length ? {t: 'ocr', rot: R, lang: langs, words} : null;
+}
+/* Recognizes the text of pages (ids); the result is one undo step. Esc stops; pages done so far are kept. */
+async function runOcr(ids, langs) {
+  const d = cur(); if (!d || ocrRun) return;
+  const pages = d.pages.filter(p => ids.has(p.id));
+  if (!pages.length) return toast(t('ocr.nothing'));
+  const job = window.LoadBar ? LoadBar.start(d.name) : null, results = new Map();
+  ocrRun = {stop: false};
+  let words = 0;
+  try {
+    if (job) job.step(t('ocr.loading'), 0, .04, {busy: true});
+    await ocrEngine(langs);
+    for (let i = 0; i < pages.length && !ocrRun.stop; i++) {
+      const from = .04 + .96 * i / pages.length, to = .04 + .96 * (i + 1) / pages.length;
+      if (job) job.step(t('ocr.page', {i: i + 1, n: pages.length}), from, to);
+      ocrProgress = f => job && job.set(f, t('ocr.stop'));
+      const a = await recognizePage(d, pages[i], langs);
+      results.set(pages[i].id, a);
+      if (a) words += a.words.length;
+    }
+  } catch (e) { toast(t('ocr.fail', {e: e.message || e})); }
+  finally { ocrProgress = null; if (job) job.done(); }
+  const stopped = ocrRun.stop; ocrRun = null;
+  // Pages deleted meanwhile are skipped; a page read again gets its new text.
+  const live = [...results].filter(([id]) => d.pages.some(p => p.id === id));
+  if (live.length) {
+    pushHistory(d);
+    for (const [id, a] of live) {
+      const rest = (d.annots[id] || []).filter(x => x.t !== 'ocr');
+      d.annots[id] = a ? [a, ...rest] : rest;
+    }
+    if (d === cur()) changed(); else d.dirty = true;
+    if ($('#findbar').classList.contains('show')) runFind();
+  }
+  toast(t(stopped ? 'ocr.stopped' : 'ocr.done', {p: live.length, w: words}));
+}
+async function ocrDialog() {
+  const d = cur(); if (!d) return;
+  if (ocrRun) return toast(t('ocr.busy'));
+  const o = {...DEF.ocr, ...settings.ocr}, sel = d.pages.filter(p => d.selected.has(p.id));
+  const opt = (v, l, on) => `<option value="${v}"${on ? ' selected' : ''}>${esc(l)}</option>`;
+  const which = [['notext', t('ocr.pNoText')], ['current', t('ocr.pCurrent', {n: d.current + 1})], ...(sel.length > 1 ? [['selected', t('ocr.pSelected', {n: sel.length})]] : []), ['all', t('ocr.pAll', {n: d.pages.length})]];
+  if (!which.some(w => w[0] === o.pages)) o.pages = 'notext';
+  modal(t('a.ocr'), `<p class="hint">${esc(t('ocr.intro'))}</p><div class="blank-form">
+    <label for="oPages">${esc(t('ocr.pages'))}</label><select id="oPages">${which.map(([v, l]) => opt(v, l, o.pages === v)).join('')}</select>
+    <label for="oLang">${esc(t('ocr.lang'))}</label><select id="oLang">${[['deu+eng', 'Deutsch + English'], ['deu', 'Deutsch'], ['eng', 'English']].map(([v, l]) => opt(v, l, o.lang === v)).join('')}</select>
+  </div>`, [{label: t('ui.cancel'), onClick: closeModal}, {label: t('ocr.start'), primary: true, onClick: () => go()}]);
+  const go = async () => {
+    const choice = {pages: $('#oPages').value, lang: $('#oLang').value};
+    settings.ocr = choice; saveState(); closeModal();
+    let list = choice.pages === 'current' ? [d.pages[d.current]] : choice.pages === 'selected' ? sel : d.pages;
+    // "Pages without text": pages that have no text of their own and weren't read yet.
+    if (choice.pages === 'notext') { const keep = []; for (const p of list) if (!hasOcr(d, p) && !(await pdfText(d, p)).trim()) keep.push(p); list = keep; }
+    if (!list.length) return toast(t('ocr.nothing'));
+    runOcr(new Set(list.map(p => p.id)), choice.lang);
+  };
+}
+function removeOcr() {
+  const d = cur(); if (!d) return;
+  const ids = d.selected.size ? [...d.selected] : [d.pages[d.current].id];
+  if (!ids.some(id => (d.annots[id] || []).some(a => a.t === 'ocr'))) return;
+  pushHistory(d);
+  ids.forEach(id => { if (d.annots[id]) d.annots[id] = d.annots[id].filter(a => a.t !== 'ocr'); });
+  changed();
+}
+/* Recognized words as invisible spans in the page's text layer: they rotate with the page and are stretched to the
+   width Tesseract measured, like pdf.js does with real text. */
+function drawOcr(el) {
+  const tl = el.querySelector('.textLayer'), d = cur();
+  if (!tl || !el._vp || !d) return;
+  tl.querySelectorAll('.ocr').forEach(x => x.remove());
+  const list = (d.annots[el._pg.id] || []).filter(a => a.t === 'ocr');
+  if (!list.length) return;
+  const vp = el._vp, s = vp.scale, frag = document.createDocumentFragment();
+  measureCtx = measureCtx || document.createElement('canvas').getContext('2d');
+  for (const a of list) {
+    const angle = ((effRot(el._pg) - a.rot) % 360 + 360) % 360;
+    for (const w of a.words) {
+      const [x, y] = vp.convertToViewportPoint(w.x, w.y), size = w.h * .9 * s;
+      measureCtx.font = `${size}px sans-serif`;
+      const nat = measureCtx.measureText(w.s).width || 1;
+      const span = document.createElement('span');
+      span.className = 'ocr'; span.textContent = w.s + (w.n ? '' : ' ');
+      span.style.cssText = `left:${x}px;top:${y}px;font-size:${size}px;font-family:sans-serif;line-height:${w.h * s}px;transform:rotate(${angle}deg) scaleX(${w.w * s / nat})`;
+      frag.append(span);
+      if (w.n) { const br = document.createElement('br'); br.className = 'ocr'; frag.append(br); }
+    }
+  }
+  tl.insertBefore(frag, tl.querySelector('.endOfContent'));
+}
+/* For saving: each word at its baseline in PDF space, at the rotation it was read in, stretched to its width. */
+function ocrPdf(d, p, a) {
+  const vpO = proxyOf(d, p).getViewport({scale: 1, rotation: a.rot});
+  return {t: 'ocr', rot: a.rot, words: a.words.map(w => {
+    const [vx, vy] = vpO.convertToViewportPoint(w.x, w.y), size = +(w.h * .9).toFixed(2);
+    const [x, y] = vpO.convertToPdfPoint(vx, vy + w.h * .78), nat = helvWidth(w.s, size);
+    return {x: +x.toFixed(2), y: +y.toFixed(2), size, tz: nat > 0 ? +(100 * w.w / nat).toFixed(1) : 100, text: w.s};
+  })};
+}
+/* A PDF whose first pages have no text at all is probably scanned: say where to find text recognition. */
+async function ocrHint(d) {
+  const look = d.pages.slice(0, 3);
+  if (!look.length || look.some(p => hasOcr(d, p))) return;
+  for (const p of look) if ((await pdfText(d, p)).trim()) return;
+  if (d === cur()) toast(t('ocr.hint'));
+}
+
 /* ================= Building the output PDF ================= */
 /* The PDF is assembled in Rust (pdfbuild.rs): page order and rotation, pages from other files, and the annotations.
    The UI only lays out the notes (display geometry); Rust writes everything into the file. */
@@ -929,6 +1085,7 @@ function annotsPdf(d, p) {
   const R = effRot(p), vp1 = proxyOf(d, p).getViewport({scale: 1, rotation: R});
   return (d.annots[p.id] || []).flatMap(a => {
     if (a.t === 'hl') return {t: 'hl', r: a.r, c: a.c};
+    if (a.t === 'ocr') return ocrPdf(d, p, a);
     if (a.t === 'hlt') return a.rs.map(r => ({t: 'hl', r, c: a.c}));
     if (a.t === 'ink') return {t: 'ink', p: a.p, w: a.w, c: a.c};
     if (a.t === 'sig') return a.s.map(p => ({t: 'ink', p, w: a.w, c: a.c}));
@@ -1169,13 +1326,19 @@ function buildProps() {
 /* ================= Search ================= */
 const textCache = new Map();
 const find = {q: '', hits: [], i: -1};
-async function pageText(d, pg) {
+/* The page's own text (from the PDF) … */
+async function pdfText(d, pg) {
   const k = `${d.id}:${pg.src}:${pg.index}`;
   if (!textCache.has(k)) {
     const tc = await proxyOf(d, pg).getTextContent();
     textCache.set(k, tc.items.map(it => it.str + (it.hasEOL ? '\n' : '')).join('').toLowerCase());
   }
   return textCache.get(k);
+}
+/* … plus the text recognized on it (OCR), for searching. */
+async function pageText(d, pg) {
+  const ocr = (d.annots[pg.id] || []).filter(a => a.t === 'ocr').map(a => a.words.map(w => w.s + (w.n ? '\n' : ' ')).join('')).join('\n');
+  return (await pdfText(d, pg)) + (ocr ? '\n' + ocr.toLowerCase() : '');
 }
 let findT, findRun = 0;
 async function runFind() {
@@ -1267,6 +1430,7 @@ const ICONS = {
   rotR: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>',
   extract: '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 18v-6M9 15l3 3 3-3"/></svg>',
+  ocr: '<svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M8 16l2.5-8h1L14 16M9 13.2h4M16 9v7"/></svg>',
   blank: '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M17 15v6M14 18h6" stroke-width="2.2"/></svg>',
   insert: '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 12v6M9 15h6"/></svg>',
   moon: '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
@@ -1279,7 +1443,7 @@ const needsDoc = fn => () => cur() && fn();
 const A = {
   toggleAutoHide: () => { settings.autoHide = !settings.autoHide; applySettings(); },
   openFile: async () => openFiles(await pickFiles()),
-  insertPdf: needsDoc(() => insertPdf()), insertBlank: needsDoc(() => blankDialog()), save: needsDoc(() => save(false)), saveAs: needsDoc(() => save(true)),
+  insertPdf: needsDoc(() => insertPdf()), insertBlank: needsDoc(() => blankDialog()), ocr: needsDoc(() => ocrDialog()), removeOcr: needsDoc(removeOcr), save: needsDoc(() => save(false)), saveAs: needsDoc(() => save(true)),
   exportPng: needsDoc(exportPng), print: needsDoc(printDoc), closeTab: needsDoc(() => closeTab(active)),
   undo: () => undoRedo(false), redo: () => undoRedo(true),
   find: needsDoc(openFind), findNext: needsDoc(() => findStep()),
@@ -1336,7 +1500,7 @@ const MENUS = [
     ['toolHighlight', 'M', () => tool === 'highlight', true], ['toolPen', 'P', () => tool === 'pen', true],
     ['toolText', 'T', () => tool === 'text', true], ['toolNote', 'N', () => tool === 'note', true], ['toolSign', 'S', () => tool === 'sign', true], ['signEdit'],
     ['toolErase', 'E', () => tool === 'erase', true], '-',
-    ['textBold', 'Ctrl+B', () => settings.textBold], ['highlightSelection', 'Ctrl+Shift+H']]],
+    ['textBold', 'Ctrl+B', () => settings.textBold], ['highlightSelection', 'Ctrl+Shift+H'], '-', ['ocr', 'Ctrl+Shift+T'], ['removeOcr']]],
   ['view', [['fitWidth', 'Ctrl+1', () => cur() && cur().zoomMode === 'fit-width'], ['fitPage', 'Ctrl+2', () => cur() && cur().zoomMode === 'fit-page'],
     ['actualSize', 'Ctrl+0'], ['zoomIn', 'Ctrl+='], ['zoomOut', 'Ctrl+-'], '-',
     ['togglePanels', 'Ctrl+\\', () => settings.dock], ['toggleAutoHide', null, () => settings.autoHide], ['toggleInvert', 'Ctrl+Shift+I', () => settings.invert]]],
@@ -1397,7 +1561,7 @@ function buildToolbars() {
     ['redo', ICONS.redo, {needsDoc: 1}], ['find', ICONS.search, {needsDoc: 1}]]);
   fill('#viewBtns', [['toggleInvert', ICONS.moon], ['print', ICONS.print, {needsDoc: 1}], ['togglePanels', ICONS.panel], ['settings', ICONS.gear], ['shortcuts', ICONS.help]]);
   fill('#pageTools', [['rotateLeft', ICONS.rotL, {needsDoc: 1}], ['rotateRight', ICONS.rotR, {needsDoc: 1}], ['deletePages', ICONS.trash, {needsDoc: 1}],
-    ['extractPages', ICONS.extract, {needsDoc: 1}], ['insertPdf', ICONS.insert, {needsDoc: 1}], ['insertBlank', ICONS.blank, {needsDoc: 1}]]);
+    ['extractPages', ICONS.extract, {needsDoc: 1}], ['insertPdf', ICONS.insert, {needsDoc: 1}], ['insertBlank', ICONS.blank, {needsDoc: 1}], ['ocr', ICONS.ocr, {needsDoc: 1}]]);
   const tools = $('#tools'); tools.innerHTML = '';
   [['toolSelect', 'select'], ['toolHand', 'hand'], '-', ['toolHighlight', 'highlight'], ['toolPen', 'pen'], ['toolText', 'text'], ['toolNote', 'note'], ['toolSign', 'sign'], ['toolErase', 'erase'], '-']
     .forEach(r => {
@@ -1438,6 +1602,7 @@ window.addEventListener('keydown', e => {
   if (window.Shortcuts && Shortcuts.recording) return;   // Settings → Shortcuts is taking a key
   if (e.key === 'Escape') {
     if (textEd) return textEd.commit(false);   // cancels the text being written
+    if (ocrRun && !$('#modal').classList.contains('show')) { ocrRun.stop = true; return; }   // stops text recognition after the page being read
     if ($('#modal').classList.contains('show')) $('#modalClose').click();   // also cancels a password prompt
     else if (menuOpen) closeMenus();
     else if ($('#findbar').classList.contains('show')) closeFind();
@@ -1604,7 +1769,7 @@ if (window.Native) {
       const i = +th.dataset.i, id = d.pages[i].id;
       if (!d.selected.has(id)) d.selected = new Set([id]);
       d.current = i; markThumbs(); updateUI();
-      return [item('rotateLeft'), item('rotateRight'), item('deletePages'), null, item('extractPages'), item('insertPdf'), item('insertBlank')];
+      return [item('rotateLeft'), item('rotateRight'), item('deletePages'), null, item('extractPages'), item('insertPdf'), item('insertBlank'), null, item('ocr')];
     }
     const pg = e.target.closest('.page');
     if (pg) {
@@ -1614,7 +1779,7 @@ if (window.Native) {
       const k = annotAt(pg, e.clientX, e.clientY), ann = k >= 0;
       ctx.ann = ann ? {pg: pg._pg, k} : null;
       return [Native.copyTextItem(), ...(selectionRange() ? [item('highlightSelection')] : []), ...(ann ? [null, {id: 'ctx:delAnn', label: t('ctx.deleteAnnot')}] : []), null,
-        item('rotateLeft'), item('rotateRight'), item('deletePages'), item('exportPng'), null,
+        item('rotateLeft'), item('rotateRight'), item('deletePages'), item('exportPng'), item('ocr'), ...(hasOcr(d, d.pages[i]) ? [item('removeOcr')] : []), null,
         ...['select', 'hand', 'highlight', 'pen', 'text', 'note', 'sign'].map(n => item(TOOL_ACT[n], {checked: tool === n}))];
     }
     return null;
@@ -1661,5 +1826,5 @@ if (window.Native) {
 })();
 
 // Exposed for automated UI tests in a browser.
-window.__pd = {insertBlank, blankDialog, highlightRange, selectionRange, openNoteEditor, openTextEditor, textDown, getTextEd: () => textEd, settings: () => settings, openFiles, A, cur, buildPdf, setZoom, goToPage, addAnnot, annotAt, movePages, deletePages, rotatePages, insertPdf, undoRedo,
+window.__pd = {runOcr, ocrDialog, recognizePage, pageText, ocrRunning: () => !!ocrRun, insertBlank, blankDialog, highlightRange, selectionRange, openNoteEditor, openTextEditor, textDown, getTextEd: () => textEd, settings: () => settings, openFiles, A, cur, buildPdf, setZoom, goToPage, addAnnot, annotAt, movePages, deletePages, rotatePages, insertPdf, undoRedo,
   find, runFind, findStep, settings: () => settings, pdfjsLib, PDF_OPTS};
