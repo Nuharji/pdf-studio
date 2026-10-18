@@ -2734,7 +2734,7 @@ dependencies = [
 
 [[package]]
 name = "pdf-studio"
-version = "1.11.0"
+version = "1.11.1"
 dependencies = [
  "lopdf",
  "serde",

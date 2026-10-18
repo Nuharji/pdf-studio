@@ -324,8 +324,19 @@ async function renderForm(el, key) {
     input.className = 'ff';
     input.title = a.alternativeText || name;
     Object.assign(input.style, {left: box.left + 'px', top: box.top + 'px', width: box.width + 'px', height: box.height + 'px'});
+    // Text is taken over with every key (one undo step per visit to the field), so Save / Ctrl+S, which keep the focus in
+    // the field, already have it and the document counts as changed.
+    if (input.type === 'text' || input.tagName === 'TEXTAREA') {
+      let typing = false;
+      input.addEventListener('focus', () => { typing = false; });
+      input.addEventListener('input', () => {
+        if (!typing) { typing = true; pushHistory(d); d.form[name] = input.value; changed(); }
+        else d.form[name] = input.value;
+      });
+    }
     input.addEventListener('change', () => {
       const value = input.type === 'checkbox' ? input.checked : input.type === 'radio' ? (input.checked ? input.dataset.on : 'Off') : input.value;
+      if (d.form[name] === value) return;   // text already taken over while typing
       pushHistory(d); d.form[name] = value; changed();
       // The other buttons of a radio group follow.
       if (input.type === 'radio') pagesEl.querySelectorAll(`.formLayer input[name="${CSS.escape(input.name)}"]`).forEach(r => { r.checked = r.dataset.on === value; });
