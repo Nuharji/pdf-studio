@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.12.0 — 2026-10-24
+- New: Send to Agent Studio (File menu, Ctrl+Shift+A, or right-click on a page): the PDF (and the selected text) with a
+  task for Claude — Summarize, Make a quiz, Study sheet (each as a new Markdown file next to the PDF), Ask a question, or
+  your own task. The answer and the new files come back as a card at the bottom right; Open shows them in the program
+  your system uses for them. Needs Agent Studio 0.8 or later.
+
 ## 1.11.1 — 2026-10-18
 - Fixed: in a form, text typed into a field was only taken over when you left the field. Saving right after typing (Ctrl+S or the Save button) left the last field empty in the file, and typing alone didn't count as a change, so closing didn't ask. Text is now taken over as you type, one undo step per field.
 

@@ -1452,6 +1452,18 @@ const ICONS = {
 };
 const needsDoc = fn => () => cur() && fn();
 const A = {
+  /* "Send to Agent Studio" (agentlink.js): the PDF (and the selected text) with a task for Claude — summary, quiz,
+     questions; the answer and new files come back as a card in the corner. */
+  sendToAgent: () => {
+    const d = cur(); if (!d || !window.AgentLink) return;
+    if (!d.path) { toast(t('agent.saveFirst')); return; }
+    const sel = String(window.getSelection() || '').trim(), stem = d.name.replace(/\.pdf$/i, '');
+    AgentLink.send({title: d.name, files: [d.path], selection: sel, presets: [
+      {label: t('agent.summary'), task: t('agent.summaryTask', {name: stem}), level: 'edit'},
+      {label: t('agent.quiz'), task: t('agent.quizTask', {name: stem}), level: 'edit'},
+      {label: t('agent.cards'), task: t('agent.cardsTask', {name: stem}), level: 'edit'},
+      {label: t('agent.ask'), task: t('agent.askTask'), level: 'read'}]});
+  },
   toggleAutoHide: () => { settings.autoHide = !settings.autoHide; applySettings(); },
   openFile: async () => openFiles(await pickFiles()),
   insertPdf: needsDoc(() => insertPdf()), insertBlank: needsDoc(() => blankDialog()), ocr: needsDoc(() => ocrDialog()), removeOcr: needsDoc(removeOcr), save: needsDoc(() => save(false)), saveAs: needsDoc(() => save(true)),
@@ -1503,7 +1515,7 @@ const A = {
 // [action, shortcut, checked(), letterKey]; '-' separator, '#key' section label.
 const MENUS = [
   ['file', [['openFile', 'Ctrl+O'], ['insertPdf', 'Ctrl+Shift+O'], '-', ['save', 'Ctrl+S'], ['saveAs', 'Ctrl+Shift+S'], '-',
-    ['exportPng', 'Ctrl+E'], ['print', 'Ctrl+P'], '-', ['closeTab', 'Alt+W']]],
+    ['exportPng', 'Ctrl+E'], ['print', 'Ctrl+P'], '-', ['sendToAgent', 'Ctrl+Shift+A'], '-', ['closeTab', 'Alt+W']]],
   ['edit', [['undo', 'Ctrl+Z'], ['redo', 'Ctrl+Y'], '-', ['find', 'Ctrl+F'], ['findNext', 'F3'], '-', ['selectAllPages']]],
   ['pages', [['rotateLeft', 'Ctrl+Shift+R'], ['rotateRight', 'Ctrl+R'], ['deletePages', 'Delete', null, true], ['extractPages', 'Ctrl+Shift+E'], ['insertBlank', 'Ctrl+Shift+N'], '-',
     ['firstPage', 'Ctrl+Home'], ['prevPage', 'Ctrl+PageUp'], ['nextPage', 'Ctrl+PageDown'], ['lastPage', 'Ctrl+End']]],
@@ -1789,7 +1801,7 @@ if (window.Native) {
       d.current = i; markThumbs(); updatePageUI();
       const k = annotAt(pg, e.clientX, e.clientY), ann = k >= 0;
       ctx.ann = ann ? {pg: pg._pg, k} : null;
-      return [Native.copyTextItem(), ...(selectionRange() ? [item('highlightSelection')] : []), ...(ann ? [null, {id: 'ctx:delAnn', label: t('ctx.deleteAnnot')}] : []), null,
+      return [Native.copyTextItem(), ...(selectionRange() ? [item('highlightSelection')] : []), item('sendToAgent'), ...(ann ? [null, {id: 'ctx:delAnn', label: t('ctx.deleteAnnot')}] : []), null,
         item('rotateLeft'), item('rotateRight'), item('deletePages'), item('exportPng'), item('ocr'), ...(hasOcr(d, d.pages[i]) ? [item('removeOcr')] : []), null,
         ...['select', 'hand', 'highlight', 'pen', 'text', 'note', 'sign'].map(n => item(TOOL_ACT[n], {checked: tool === n}))];
     }
@@ -1820,6 +1832,11 @@ if (window.Native) {
   applyLanguage();
   booted = true;
   applySettings(); setTool('select'); renderTabs(); renderRecent(); updateUI();
+  // Results of tasks sent to Agent Studio: a PDF opens here, other files with the program the system uses for them.
+  if (window.AgentLink) AgentLink.init({app: 'PDF Studio', lang: () => lang, open: path => {
+    if (!/\.pdf$/i.test(path)) return false;
+    return openFileInfo({path, name: path.split(/[\\/]/).pop()});
+  }});
   if (invoke) {
     window.__TAURI__.window.getCurrentWindow().onCloseRequested(async ev => {
       finishEditors(); saveState();

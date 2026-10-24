@@ -241,5 +241,15 @@
   "ocr.nothing": "Keine Seite braucht die Texterkennung – alle haben schon Text.",
   "ocr.busy": "Die Texterkennung läuft schon.",
   "ocr.fail": "Texterkennung fehlgeschlagen: {e}",
-  "ocr.hint": "Diese PDF sieht gescannt aus (kein Text). Werkzeuge → Text erkennen (Strg+Umschalt+T) macht sie durchsuchbar."
+  "ocr.hint": "Diese PDF sieht gescannt aus (kein Text). Werkzeuge → Text erkennen (Strg+Umschalt+T) macht sie durchsuchbar.",
+  "a.sendToAgent": "An Agent Studio senden…",
+  "agent.saveFirst": "Speichere das PDF zuerst — Agent Studio arbeitet mit der Datei.",
+  "agent.summary": "Zusammenfassen",
+  "agent.summaryTask": "Fasse das PDF (oder den markierten Text) zusammen: die Hauptpunkte in wenigen Sätzen, dann die wichtigsten Begriffe. Speichere die Zusammenfassung als neue Markdown-Datei „{name} – Zusammenfassung.md“ daneben.",
+  "agent.quiz": "Quiz daraus machen",
+  "agent.quizTask": "Mach aus dem PDF ein Quiz: 10 Fragen (Multiple Choice und offene) mit den Lösungen am Ende. Speichere es als neue Markdown-Datei „{name} – Quiz.md“ daneben.",
+  "agent.cards": "Lernzettel",
+  "agent.cardsTask": "Mach aus dem PDF einen Lernzettel in Markdown (Überschriften, Stichpunkte, Formeln, 5 Kontrollfragen mit Lösungen) und speichere ihn als neue Datei „{name} – Lernzettel.md“ daneben.",
+  "agent.ask": "Frage stellen",
+  "agent.askTask": "Beantworte anhand des PDFs: "
 }

@@ -241,5 +241,15 @@
   "ocr.nothing": "No page needs text recognition – they all have text already.",
   "ocr.busy": "Text recognition is already running.",
   "ocr.fail": "Text recognition failed: {e}",
-  "ocr.hint": "This PDF looks scanned (no text). Tools → Recognize Text (Ctrl+Shift+T) makes it searchable."
+  "ocr.hint": "This PDF looks scanned (no text). Tools → Recognize Text (Ctrl+Shift+T) makes it searchable.",
+  "a.sendToAgent": "Send to Agent Studio…",
+  "agent.saveFirst": "Save the PDF first — Agent Studio works with the file.",
+  "agent.summary": "Summarize",
+  "agent.summaryTask": "Summarize the PDF (or the selected text): the main points in a few sentences, then the key terms. Save the summary as a new Markdown file “{name} – summary.md” next to it.",
+  "agent.quiz": "Make a quiz",
+  "agent.quizTask": "Make a quiz from the PDF: 10 questions (multiple choice and open ones) with the answers at the end. Save it as a new Markdown file “{name} – quiz.md” next to it.",
+  "agent.cards": "Study sheet",
+  "agent.cardsTask": "Turn the PDF into a study sheet in Markdown (headings, key points, formulas, 5 test questions with answers) and save it as a new file “{name} – study sheet.md” next to it.",
+  "agent.ask": "Ask a question",
+  "agent.askTask": "Answer from the PDF: "
 }
