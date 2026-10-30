@@ -1690,7 +1690,7 @@ function renderSettings() {
     appearance: `<h3>${t('set.theme')}</h3><div class="theme-grid">` + THEMES.map(th =>
         `<button class="theme-card${settings.theme === th ? ' active' : ''}" data-theme-pick="${th}">${mock(th)}
          <div class="theme-name">${esc(t('theme.' + th))}<span>${settings.theme === th ? '&#10003;' : ''}</span></div></button>`).join('') +
-      `</div><h3>${t('set.reading')}</h3>${sw('invert', t('set.invert'))}`,
+      `</div>` + (window.Shared ? Shared.layoutHeading() : '') + `<h3>${t('set.reading')}</h3>${sw('invert', t('set.invert'))}`,
     viewer: `<h3>${t('set.defaultZoom')}</h3><select class="wide-sel" data-sel="zoomMode">${opt('fit-width', t('ui.fitWidthOpt'), settings.zoomMode)}${opt('fit-page', t('ui.fitPageOpt'), settings.zoomMode)}${opt('actual', '100 %', settings.zoomMode)}</select>
       <h3>${t('set.spell')}</h3><p class="hint">${t('set.spellHint')}</p><select class="wide-sel" data-sel="spell">${opt('auto', t('set.spellAuto'), settings.spell)}${opt('de', 'Deutsch', settings.spell)}${opt('en', 'English', settings.spell)}${opt('off', t('set.spellOff'), settings.spell)}</select>`
   };

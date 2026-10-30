@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.13.0 — 2026-10-30
+- New: Layouts, next to the themes (Settings → Appearance; shared by all Studio apps, any layout goes with any theme). **Adobe** is the look so far; **Modern** has rounded, floating panels and more room; **Custom** is yours: panels and tool rail left or right, density, corners, floating panels, status bar.
+
 ## 1.12.0 — 2026-10-24
 - New: Send to Agent Studio (File menu, Ctrl+Shift+A, or right-click on a page): the PDF (and the selected text) with a
   task for Claude — Summarize, Make a quiz, Study sheet (each as a new Markdown file next to the PDF), Ask a question, or
