@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.14.1 — 2026-11-03
+- Fix (macOS): the app no longer asks again and again for access to your Documents folder (or Desktop, Downloads). The app is now signed as a whole, so macOS can remember your answer. After an update, macOS may ask once more.
+
 ## 1.14.0 — 2026-11-03
 - New: MCP server. Started with `--mcp`, PDF Studio opens no window and lets Claude, ChatGPT and other MCP clients use it: `pdf_info`, `pdf_text`, `pdf_extract_pages`, `pdf_merge`. The originals stay untouched; a result is a new file (an existing one is only replaced with `overwrite`). Setup: see README → MCP.
 
