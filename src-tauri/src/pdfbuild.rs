@@ -201,7 +201,6 @@ fn flatten_inherited(doc: &mut Document, page: ObjectId) {
     }
 }
 
-#[cfg(test)]
 pub fn build(sources: &[Vec<u8>], pages: &[PageReq]) -> Result<Vec<u8>, String> { build_form(sources, pages, &[]) }
 
 pub fn build_form(sources: &[Vec<u8>], pages: &[PageReq], form: &[FieldVal]) -> Result<Vec<u8>, String> {
