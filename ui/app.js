@@ -31,7 +31,7 @@ const fmtSize = b => b >= 1048576 ? (b / 1048576).toLocaleString(lang, {maximumF
   : Math.max(1, Math.round(b / 1024)).toLocaleString(lang) + ' KB';
 
 /* ================= Settings & state ================= */
-const THEMES = ['dark', 'light', 'github', 'github-dark'];
+const THEMES = ['dark', 'light', 'github', 'github-dark', 'cli'];
 const COLORS = ['#FFD400', '#7CE38B', '#62B3FF', '#FF7AB6', '#E5384F', '#1F2328'];
 const DEF = {keys: {}, autoHide: false, lang: 'auto', theme: 'dark', zoomMode: 'fit-width', invert: false, dock: true, dockTab: 'pages', reopen: true, color: '#FFD400', spell: 'auto', ocr: {pages: 'notext', lang: 'deu+eng'},
   textColor: '#1F2328', textFont: 'helv', textSize: 14, textBold: false};
@@ -1493,7 +1493,7 @@ const A = {
   settings: () => openSettings(),
   langAuto: () => setPref('lang', 'auto'), langEn: () => setPref('lang', 'en'), langDe: () => setPref('lang', 'de'),
   themeDark: () => setPref('theme', 'dark'), themeLight: () => setPref('theme', 'light'),
-  themeGithub: () => setPref('theme', 'github'), themeGithubDark: () => setPref('theme', 'github-dark'),
+  themeGithub: () => setPref('theme', 'github'), themeGithubDark: () => setPref('theme', 'github-dark'), themeCli: () => setPref('theme', 'cli'),
   shortcuts: () => {
     let h = '';
     MENUS.forEach(([m, items]) => {
@@ -1531,7 +1531,7 @@ const MENUS = [
     ['langAuto', null, () => settings.lang === 'auto'], ['langEn', null, () => settings.lang === 'en'], ['langDe', null, () => settings.lang === 'de'],
     '-', '#menu.theme',
     ['themeDark', null, () => settings.theme === 'dark'], ['themeLight', null, () => settings.theme === 'light'],
-    ['themeGithub', null, () => settings.theme === 'github'], ['themeGithubDark', null, () => settings.theme === 'github-dark']]],
+    ['themeGithub', null, () => settings.theme === 'github'], ['themeGithubDark', null, () => settings.theme === 'github-dark'], ['themeCli', null, () => settings.theme === 'cli']]],
   ['help', [['shortcuts'], '-', ['about']]]
 ];
 const KEYMAP = {}, LETTERS = {};
