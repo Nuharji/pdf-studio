@@ -2734,9 +2734,12 @@ dependencies = [
 
 [[package]]
 name = "pdf-studio"
-version = "1.18.0"
+version = "1.19.0"
 dependencies = [
  "lopdf",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "spellbook",
